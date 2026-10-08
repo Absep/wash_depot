@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { supabase } from "./supabase";
 import "./App.css";
 
 const workers = ["Imran", "Bapu", "New Guy"];
@@ -22,15 +23,10 @@ function App() {
     amount: "",
   });
 
-  const [vehicles, setVehicles] = useState(() => {
-    const saved = localStorage.getItem("carWashVehicles");
-    return saved ? JSON.parse(saved) : [];
-  });
+  const [vehicles, setVehicles] = useState([]);
 
   const [showHistory, setShowHistory] = useState(false);
-
   const [selectedDate, setSelectedDate] = useState(today);
-
   const [editingId, setEditingId] = useState(null);
 
   const [editVehicle, setEditVehicle] = useState({
@@ -41,43 +37,66 @@ function App() {
     amount: "",
   });
 
-  // Save vehicles whenever they change
+  const [loading, setLoading] = useState(true);
+
+  // Load vehicles from Supabase
   useEffect(() => {
-    localStorage.setItem(
-      "carWashVehicles",
-      JSON.stringify(vehicles)
-    );
-  }, [vehicles]);
+    loadVehicles();
+  }, []);
 
-  // -----------------------------
-  // FORM
-  // -----------------------------
+  const loadVehicles = async () => {
+    const { data, error } = await supabase
+      .from("vehicles")
+      .select("*")
+      .order("created_at", { ascending: false });
 
-  const handleChange = (e) => {
-    setVehicle({
-      ...vehicle,
-      [e.target.name]: e.target.value,
-    });
+    if (error) {
+      console.error("Error loading vehicles:", error);
+      alert("Could not load vehicles.");
+      return;
+    }
+
+    setVehicles(data || []);
+    setLoading(false);
   };
 
-  const addVehicle = (e) => {
+  // Add vehicle
+  const addVehicle = async (e) => {
     e.preventDefault();
 
-    const newVehicle = {
-      id: Date.now(),
+    if (
+      !vehicle.name ||
+      !vehicle.type ||
+      !vehicle.worker ||
+      !vehicle.amount
+    ) {
+      alert("Please fill all required fields.");
+      return;
+    }
 
-      name: vehicle.name,
-      type: vehicle.type,
-      worker: vehicle.worker,
-      phone: vehicle.phone,
-      amount: Number(vehicle.amount),
+    const { data, error } = await supabase
+      .from("vehicles")
+      .insert([
+        {
+          vehicle_name: vehicle.name,
+          vehicle_type: vehicle.type,
+          assigned_worker: vehicle.worker,
+          phone: vehicle.phone,
+          amount: Number(vehicle.amount),
+          status: "Washing",
+          service_date: today,
+        },
+      ])
+      .select()
+      .single();
 
-      date: today,
+    if (error) {
+      console.error("Error adding vehicle:", error);
+      alert("Could not add vehicle.");
+      return;
+    }
 
-      status: "Washing",
-    };
-
-    setVehicles([...vehicles, newVehicle]);
+    setVehicles([data, ...vehicles]);
 
     setVehicle({
       name: "",
@@ -88,32 +107,39 @@ function App() {
     });
   };
 
-  // -----------------------------
-  // COMPLETE VEHICLE
-  // -----------------------------
+  // Mark completed
+  const markCompleted = async (id) => {
+    const { error } = await supabase
+      .from("vehicles")
+      .update({ status: "Completed" })
+      .eq("id", id);
 
-  const markCompleted = (id) => {
+    if (error) {
+      console.error("Error updating status:", error);
+      alert("Could not update status.");
+      return;
+    }
+
     setVehicles(
       vehicles.map((item) =>
         item.id === id
-          ? {
-              ...item,
-              status: "Completed",
-            }
+          ? { ...item, status: "Completed" }
           : item
       )
     );
   };
 
-  // -----------------------------
-  // WHATSAPP
-  // -----------------------------
-
+  // Send WhatsApp
   const sendWhatsApp = (item) => {
     const message =
       "Hello! Your vehicle has been professionally cleaned and is ready for pickup. Thank you for choosing Wash Depot!";
 
-    const phone = item.phone.replace(/\D/g, "");
+    let phone = item.phone.replace(/\D/g, "");
+
+    // Automatically add India country code for 10-digit numbers
+    if (phone.length === 10) {
+      phone = "91" + phone;
+    }
 
     window.open(
       `https://wa.me/${phone}?text=${encodeURIComponent(message)}`,
@@ -121,26 +147,20 @@ function App() {
     );
   };
 
-  // -----------------------------
-  // START EDITING
-  // -----------------------------
-
+  // Start editing
   const startEditing = (item) => {
     setEditingId(item.id);
 
     setEditVehicle({
-      name: item.name,
-      type: item.type,
-      worker: item.worker,
-      phone: item.phone,
+      name: item.vehicle_name,
+      type: item.vehicle_type,
+      worker: item.assigned_worker,
+      phone: item.phone || "",
       amount: item.amount,
     });
   };
 
-  // -----------------------------
-  // EDIT FORM CHANGE
-  // -----------------------------
-
+  // Edit input change
   const handleEditChange = (e) => {
     setEditVehicle({
       ...editVehicle,
@@ -148,44 +168,44 @@ function App() {
     });
   };
 
-  // -----------------------------
-  // SAVE EDIT
-  // -----------------------------
+  // Save edit
+  const saveEdit = async (id) => {
+    const { data, error } = await supabase
+      .from("vehicles")
+      .update({
+        vehicle_name: editVehicle.name,
+        vehicle_type: editVehicle.type,
+        assigned_worker: editVehicle.worker,
+        phone: editVehicle.phone,
+        amount: Number(editVehicle.amount),
+      })
+      .eq("id", id)
+      .select()
+      .single();
 
-  const saveEdit = (id) => {
+    if (error) {
+      console.error("Error editing vehicle:", error);
+      alert("Could not save changes.");
+      return;
+    }
+
     setVehicles(
       vehicles.map((item) =>
-        item.id === id
-          ? {
-              ...item,
-
-              name: editVehicle.name,
-              type: editVehicle.type,
-              worker: editVehicle.worker,
-              phone: editVehicle.phone,
-              amount: Number(editVehicle.amount),
-            }
-          : item
+        item.id === id ? data : item
       )
     );
 
     setEditingId(null);
   };
 
-  // -----------------------------
-  // CANCEL EDIT
-  // -----------------------------
-
+  // Cancel edit
   const cancelEdit = () => {
     setEditingId(null);
   };
 
-  // -----------------------------
-  // TODAY'S DATA
-  // -----------------------------
-
+  // Today's vehicles
   const todaysVehicles = vehicles.filter(
-    (item) => item.date === today
+    (item) => item.service_date === today
   );
 
   const todaysTotal = todaysVehicles.reduce(
@@ -195,14 +215,12 @@ function App() {
 
   const todaysWorkerTotals = workers.map((worker) => {
     const workerVehicles = todaysVehicles.filter(
-      (item) => item.worker === worker
+      (item) => item.assigned_worker === worker
     );
 
     return {
       worker,
-
       count: workerVehicles.length,
-
       total: workerVehicles.reduce(
         (sum, item) => sum + Number(item.amount),
         0
@@ -210,12 +228,9 @@ function App() {
     };
   });
 
-  // -----------------------------
-  // HISTORY DATA
-  // -----------------------------
-
+  // History
   const historyVehicles = vehicles.filter(
-    (item) => item.date === selectedDate
+    (item) => item.service_date === selectedDate
   );
 
   const historyTotal = historyVehicles.reduce(
@@ -225,14 +240,12 @@ function App() {
 
   const historyWorkerTotals = workers.map((worker) => {
     const workerVehicles = historyVehicles.filter(
-      (item) => item.worker === worker
+      (item) => item.assigned_worker === worker
     );
 
     return {
       worker,
-
       count: workerVehicles.length,
-
       total: workerVehicles.reduce(
         (sum, item) => sum + Number(item.amount),
         0
@@ -240,19 +253,12 @@ function App() {
     };
   });
 
-  // =====================================================
-  // HISTORY PAGE
-  // =====================================================
-
+  // History page
   if (showHistory) {
     return (
       <div className="app">
-
         <h1>WASH DEPOT</h1>
-
-        <p className="subtitle">
-          Vehicle History
-        </p>
+        <p className="subtitle">Vehicle History</p>
 
         <button
           className="back-button"
@@ -262,321 +268,210 @@ function App() {
         </button>
 
         <div className="history-date">
-
-          <label>
-            Select Date
-          </label>
+          <label>Select Date</label>
 
           <input
             type="date"
             value={selectedDate}
-            onChange={(e) =>
-              setSelectedDate(e.target.value)
-            }
+            onChange={(e) => setSelectedDate(e.target.value)}
           />
-
         </div>
 
+        <hr />
+
         <h2>
-          Vehicles — {selectedDate}
+          Vehicles on{" "}
+          {new Date(
+            selectedDate + "T00:00:00"
+          ).toLocaleDateString("en-IN")}
         </h2>
 
         {historyVehicles.length === 0 ? (
-
-          <p>
-            No vehicles recorded on this date.
-          </p>
-
+          <p>No vehicles recorded for this date.</p>
         ) : (
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Vehicle</th>
+                  <th>Type</th>
+                  <th>Worker</th>
+                  <th>Amount</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
 
-          <>
-            <div className="table-container">
+              <tbody>
+                {historyVehicles.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.vehicle_name}</td>
+                    <td>{item.vehicle_type}</td>
+                    <td>{item.assigned_worker}</td>
+                    <td>₹{item.amount}</td>
 
-              <table>
-
-                <thead>
-
-                  <tr>
-                    <th>Vehicle</th>
-                    <th>Type</th>
-                    <th>Worker</th>
-                    <th>Amount</th>
-                    <th>Status</th>
+                    <td
+                      className={
+                        item.status === "Completed"
+                          ? "completed"
+                          : "washing"
+                      }
+                    >
+                      {item.status}
+                    </td>
                   </tr>
-
-                </thead>
-
-                <tbody>
-
-                  {historyVehicles.map((item) => (
-
-                    <tr key={item.id}>
-
-                      <td>
-                        {item.name}
-                      </td>
-
-                      <td>
-                        {item.type}
-                      </td>
-
-                      <td>
-                        {item.worker}
-                      </td>
-
-                      <td>
-                        ₹{item.amount}
-                      </td>
-
-                      <td>
-
-                        <span
-                          className={
-                            item.status ===
-                            "Completed"
-                              ? "completed"
-                              : "washing"
-                          }
-                        >
-                          {item.status}
-                        </span>
-
-                      </td>
-
-                    </tr>
-
-                  ))}
-
-                </tbody>
-
-              </table>
-
-            </div>
-
-            <div className="totals">
-
-              <h2>
-                Daily Total
-              </h2>
-
-              <p>
-                Total Vehicles:{" "}
-                <strong>
-                  {historyVehicles.length}
-                </strong>
-              </p>
-
-              <p className="big-total">
-                ₹{historyTotal}
-              </p>
-
-            </div>
-
-            <div className="worker-section">
-
-              <h2>
-                Worker Totals
-              </h2>
-
-              <table>
-
-                <thead>
-
-                  <tr>
-                    <th>Worker</th>
-                    <th>Vehicles</th>
-                    <th>Total</th>
-                  </tr>
-
-                </thead>
-
-                <tbody>
-
-                  {historyWorkerTotals.map(
-                    (item) => (
-
-                      <tr key={item.worker}>
-
-                        <td>
-                          {item.worker}
-                        </td>
-
-                        <td>
-                          {item.count}
-                        </td>
-
-                        <td>
-                          ₹{item.total}
-                        </td>
-
-                      </tr>
-
-                    )
-                  )}
-
-                </tbody>
-
-              </table>
-
-            </div>
-          </>
-
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
 
+        <div className="totals">
+          <h2>Daily Total</h2>
+
+          <div className="big-total">
+            ₹{historyTotal}
+          </div>
+        </div>
+
+        <div className="worker-section">
+          <h2>Worker Totals</h2>
+
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Worker</th>
+                  <th>Vehicles</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {historyWorkerTotals.map((item) => (
+                  <tr key={item.worker}>
+                    <td>{item.worker}</td>
+                    <td>{item.count}</td>
+                    <td>₹{item.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }
 
-  // =====================================================
-  // MAIN PAGE
-  // =====================================================
-
+  // Main page
   return (
     <div className="app">
-
-      <h1>
-        WASH DEPOT
-      </h1>
-
+      <h1>WASH DEPOT</h1>
       <p className="subtitle">
-        Vehicle Management
+        Vehicle Service Management
       </p>
 
-      {/* ==========================
-          ADD VEHICLE
-      ========================== */}
-
-      <h2>
-        Add Vehicle
-      </h2>
+      <h2>Add Vehicle</h2>
 
       <form onSubmit={addVehicle}>
-
-        <label>
-          Vehicle Number / Model Name
-        </label>
+        <label>Vehicle Number / Model Name</label>
 
         <input
           type="text"
-          name="name"
-          placeholder="KL 07 AB 1234 / Toyota Fortuner"
+          placeholder="e.g. KL 07 AB 1234 / Fortuner"
           value={vehicle.name}
-          onChange={handleChange}
-          required
+          onChange={(e) =>
+            setVehicle({
+              ...vehicle,
+              name: e.target.value,
+            })
+          }
         />
 
-        <label>
-          Vehicle Type
-        </label>
+        <label>Vehicle Type</label>
 
         <select
-          name="type"
           value={vehicle.type}
-          onChange={handleChange}
-          required
+          onChange={(e) =>
+            setVehicle({
+              ...vehicle,
+              type: e.target.value,
+            })
+          }
         >
-
-          <option value="">
-            Select vehicle type
-          </option>
+          <option value="">Select vehicle type</option>
 
           {vehicleTypes.map((type) => (
-
-            <option
-              key={type}
-              value={type}
-            >
+            <option key={type} value={type}>
               {type}
             </option>
-
           ))}
-
         </select>
 
-        <label>
-          Assigned Worker
-        </label>
+        <label>Assigned Worker</label>
 
         <select
-          name="worker"
           value={vehicle.worker}
-          onChange={handleChange}
-          required
+          onChange={(e) =>
+            setVehicle({
+              ...vehicle,
+              worker: e.target.value,
+            })
+          }
         >
-
-          <option value="">
-            Select worker
-          </option>
+          <option value="">Select worker</option>
 
           {workers.map((worker) => (
-
-            <option
-              key={worker}
-              value={worker}
-            >
+            <option key={worker} value={worker}>
               {worker}
             </option>
-
           ))}
-
         </select>
 
-        <label>
-          Customer WhatsApp Number
-        </label>
+        <label>Customer WhatsApp Number</label>
 
         <input
           type="tel"
-          name="phone"
-          placeholder="+91 XXXXX XXXXX"
+          placeholder="10 digit number"
           value={vehicle.phone}
-          onChange={handleChange}
-          required
+          onChange={(e) =>
+            setVehicle({
+              ...vehicle,
+              phone: e.target.value,
+            })
+          }
         />
 
-        <label>
-          Amount
-        </label>
+        <label>Amount</label>
 
         <input
           type="number"
-          name="amount"
-          placeholder="₹ 600"
+          placeholder="Enter amount"
           value={vehicle.amount}
-          onChange={handleChange}
-          required
+          onChange={(e) =>
+            setVehicle({
+              ...vehicle,
+              amount: e.target.value,
+            })
+          }
         />
 
         <button type="submit">
           Add Vehicle
         </button>
-
       </form>
 
       <hr />
 
-      {/* ==========================
-          TODAY'S VEHICLES
-      ========================== */}
+      <h2>Today's Vehicles</h2>
 
-      <h2>
-        Today's Vehicles
-      </h2>
-
-      {todaysVehicles.length === 0 ? (
-
-        <p>
-          No vehicles added today.
-        </p>
-
+      {loading ? (
+        <p>Loading vehicles...</p>
+      ) : todaysVehicles.length === 0 ? (
+        <p>No vehicles added today.</p>
       ) : (
-
         <div className="table-container">
-
           <table>
-
             <thead>
-
               <tr>
                 <th>Vehicle</th>
                 <th>Type</th>
@@ -585,28 +480,19 @@ function App() {
                 <th>Status</th>
                 <th>Action</th>
               </tr>
-
             </thead>
 
             <tbody>
-
               {todaysVehicles.map((item) => (
-
                 <tr key={item.id}>
-
                   {editingId === item.id ? (
-
                     <>
                       <td>
                         <input
                           className="table-input"
                           name="name"
-                          value={
-                            editVehicle.name
-                          }
-                          onChange={
-                            handleEditChange
-                          }
+                          value={editVehicle.name}
+                          onChange={handleEditChange}
                         />
                       </td>
 
@@ -614,27 +500,17 @@ function App() {
                         <select
                           className="table-input"
                           name="type"
-                          value={
-                            editVehicle.type
-                          }
-                          onChange={
-                            handleEditChange
-                          }
+                          value={editVehicle.type}
+                          onChange={handleEditChange}
                         >
-
-                          {vehicleTypes.map(
-                            (type) => (
-
-                              <option
-                                key={type}
-                                value={type}
-                              >
-                                {type}
-                              </option>
-
-                            )
-                          )}
-
+                          {vehicleTypes.map((type) => (
+                            <option
+                              key={type}
+                              value={type}
+                            >
+                              {type}
+                            </option>
+                          ))}
                         </select>
                       </td>
 
@@ -642,49 +518,39 @@ function App() {
                         <select
                           className="table-input"
                           name="worker"
-                          value={
-                            editVehicle.worker
-                          }
-                          onChange={
-                            handleEditChange
-                          }
+                          value={editVehicle.worker}
+                          onChange={handleEditChange}
                         >
-
-                          {workers.map(
-                            (worker) => (
-
-                              <option
-                                key={worker}
-                                value={worker}
-                              >
-                                {worker}
-                              </option>
-
-                            )
-                          )}
-
+                          {workers.map((worker) => (
+                            <option
+                              key={worker}
+                              value={worker}
+                            >
+                              {worker}
+                            </option>
+                          ))}
                         </select>
                       </td>
 
                       <td>
                         <input
                           className="table-input"
-                          type="number"
                           name="amount"
-                          value={
-                            editVehicle.amount
-                          }
-                          onChange={
-                            handleEditChange
-                          }
+                          type="number"
+                          value={editVehicle.amount}
+                          onChange={handleEditChange}
                         />
                       </td>
 
-                      <td>
-                        {item.status}
-                      </td>
+                      <td>{item.status}</td>
 
                       <td>
+                        <input
+                          className="table-input"
+                          name="phone"
+                          value={editVehicle.phone}
+                          onChange={handleEditChange}
+                        />
 
                         <button
                           className="small-button"
@@ -701,46 +567,26 @@ function App() {
                         >
                           Cancel
                         </button>
-
                       </td>
                     </>
-
                   ) : (
-
                     <>
-                      <td>
-                        {item.name}
+                      <td>{item.vehicle_name}</td>
+                      <td>{item.vehicle_type}</td>
+                      <td>{item.assigned_worker}</td>
+                      <td>₹{item.amount}</td>
+
+                      <td
+                        className={
+                          item.status === "Completed"
+                            ? "completed"
+                            : "washing"
+                        }
+                      >
+                        {item.status}
                       </td>
 
                       <td>
-                        {item.type}
-                      </td>
-
-                      <td>
-                        {item.worker}
-                      </td>
-
-                      <td>
-                        ₹{item.amount}
-                      </td>
-
-                      <td>
-
-                        <span
-                          className={
-                            item.status ===
-                            "Completed"
-                              ? "completed"
-                              : "washing"
-                          }
-                        >
-                          {item.status}
-                        </span>
-
-                      </td>
-
-                      <td>
-
                         <button
                           className="edit-button"
                           onClick={() =>
@@ -750,22 +596,16 @@ function App() {
                           Edit
                         </button>
 
-                        {item.status !==
-                        "Completed" ? (
-
+                        {item.status === "Washing" ? (
                           <button
                             className="small-button"
                             onClick={() =>
-                              markCompleted(
-                                item.id
-                              )
+                              markCompleted(item.id)
                             }
                           >
                             Completed
                           </button>
-
                         ) : (
-
                           <button
                             className="whatsapp-button"
                             onClick={() =>
@@ -774,104 +614,50 @@ function App() {
                           >
                             WhatsApp
                           </button>
-
                         )}
-
                       </td>
                     </>
-
                   )}
-
                 </tr>
-
               ))}
-
             </tbody>
-
           </table>
-
         </div>
-
       )}
 
-      {/* ==========================
-          DAILY TOTAL
-      ========================== */}
-
       <div className="totals">
+        <h2>Daily Total</h2>
 
-        <h2>
-          Today's Total
-        </h2>
-
-        <p>
-          Total Vehicles:{" "}
-          <strong>
-            {todaysVehicles.length}
-          </strong>
-        </p>
-
-        <p className="big-total">
+        <div className="big-total">
           ₹{todaysTotal}
-        </p>
-
+        </div>
       </div>
-
-      {/* ==========================
-          WORKER TOTALS
-      ========================== */}
 
       <div className="worker-section">
+        <h2>Worker Totals</h2>
 
-        <h2>
-          Worker Totals
-        </h2>
+        <div className="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Vehicles</th>
+                <th>Total</th>
+              </tr>
+            </thead>
 
-        <table>
-
-          <thead>
-
-            <tr>
-              <th>Worker</th>
-              <th>Vehicles</th>
-              <th>Total</th>
-            </tr>
-
-          </thead>
-
-          <tbody>
-
-            {todaysWorkerTotals.map(
-              (item) => (
-
+            <tbody>
+              {todaysWorkerTotals.map((item) => (
                 <tr key={item.worker}>
-
-                  <td>
-                    {item.worker}
-                  </td>
-
-                  <td>
-                    {item.count}
-                  </td>
-
-                  <td>
-                    ₹{item.total}
-                  </td>
-
+                  <td>{item.worker}</td>
+                  <td>{item.count}</td>
+                  <td>₹{item.total}</td>
                 </tr>
-
-              )
-            )}
-
-          </tbody>
-
-        </table>
-
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-
-      {/* ==========================
-          HISTORY
-      ========================== */}
 
       <button
         className="history-button"
@@ -882,7 +668,6 @@ function App() {
       >
         View History
       </button>
-
     </div>
   );
 }
