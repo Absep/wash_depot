@@ -228,3 +228,99 @@ tbody tr:hover td { background: #fafafa; }
   .worker-section h2 { font-size: 18px; }
   .back-button { width: 100%; }
 }
+
+/* Android/mobile usability additions */
+html {
+  width: 100%;
+  overflow-x: clip;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+body {
+  width: 100%;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+button, input, select, summary {
+  -webkit-tap-highlight-color: transparent;
+}
+button, summary {
+  touch-action: manipulation;
+}
+.table-container {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+@media (max-width: 760px) {
+  .app {
+    width: calc(100% - 24px);
+    padding-top: calc(12px + env(safe-area-inset-top, 0px));
+    padding-bottom: calc(28px + env(safe-area-inset-bottom, 0px));
+  }
+  .app-header {
+    align-items: center;
+    gap: 12px;
+  }
+  .brand-lockup { min-width: 0; }
+  .app-header h1 { overflow-wrap: anywhere; }
+  input, select {
+    min-height: 48px;
+    font-size: 16px;
+  }
+  .app > form > button[type="submit"],
+  .lookup-button,
+  .history-button,
+  .back-button {
+    min-height: 48px;
+  }
+  .edit-button, .small-button, .cancel-button, .whatsapp-button {
+    min-height: 40px;
+    padding: 9px 11px;
+    font-size: 13px;
+  }
+  .table-container {
+    max-width: 100%;
+  }
+  table {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header { padding: 16px 13px; }
+  .brand-lockup { gap: 10px; }
+  .brand-symbol { flex-basis: 40px; width: 40px; height: 40px; }
+  .app-header h1 { font-size: clamp(18px, 5.2vw, 21px); letter-spacing: .5px; }
+  .app-header .subtitle { font-size: 12px; }
+  .page-intro { gap: 13px; }
+  .page-intro h2 { font-size: 24px; }
+  .app > form { padding: 17px 13px 18px; border-radius: 13px; }
+  .lookup-panel { padding: 14px; }
+  .lookup-card { padding: 14px; }
+  .lookup-card-heading h2 { font-size: 17px; }
+  .lookup-details-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .totals { flex-wrap: wrap; gap: 9px; }
+  .history-date { width: 100%; }
+  .history-date input { width: 100%; max-width: 100%; }
+}
+
+@media (max-width: 360px) {
+  .app { width: calc(100% - 18px); }
+  .app-header { padding: 14px 11px; }
+  .brand-symbol { flex-basis: 36px; width: 36px; height: 36px; font-size: 12px; }
+  .app-header h1 { font-size: 18px; }
+  .app > form { padding: 15px 11px; }
+  .lookup-panel, .lookup-card { padding: 12px; }
+  .totals { padding: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
