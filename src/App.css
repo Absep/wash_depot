@@ -263,4 +263,67 @@ tr:hover td {
   .cancel-button {
     margin-bottom: 5px;
   }
+  /* Add these styles to the END of your existing src/App.css */
+.loyalty-status {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #ddd;
+  border-left: 4px solid #d60000;
+  border-radius: 5px;
+  background: #fafafa;
+  color: #222;
+  line-height: 1.45;
+}
+
+.loyalty-status p {
+  margin: 6px 0 0;
+}
+
+.loyalty-status-free {
+  border-color: #d60000;
+  background: #fff1f1;
+}
+
+.loyalty-status-free strong {
+  color: #d60000;
+}
+
+.loyalty-hint {
+  margin: 10px 0 0;
+  color: #666;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+input:disabled {
+  background: #f0f0f0;
+  color: #555;
+  cursor: not-allowed;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.memory-notice {
+  margin: 10px 0 0;
+  padding: 11px 13px;
+  border: 1px solid #d8d8d8;
+  border-left: 4px solid #777;
+  border-radius: 5px;
+  color: #222;
+  background: #f7f7f7;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.memory-notice-found {
+  border-left-color: #168000;
+  background: #f0f9ed;
+}
+
+.memory-notice-new {
+  border-left-color: #555;
+  background: #f7f7f7;
+}
 }

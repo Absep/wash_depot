@@ -12,6 +12,93 @@ const vehicleTypes = [
   "Lorry / Bus",
 ];
 
+// Accept common Indian registration formats. The app's vehicle field can contain
+// either a registration alone or "REGISTRATION / MODEL".
+function getVehicleRegistration(value) {
+  const prefix = String(value || "").split("/")[0].trim().toUpperCase();
+  const normalized = prefix.replace(/[^A-Z0-9]/g, "");
+  const standardRegistration = /^[A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4}$/.test(normalized);
+  const bharatRegistration = /^\d{2}BH\d{4}[A-Z]{1,2}$/.test(normalized);
+
+  return standardRegistration || bharatRegistration ? normalized : "";
+}
+
+function getItemRegistration(item) {
+  const savedRegistration = String(item.vehicle_registration || "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "");
+
+  return savedRegistration || getVehicleRegistration(item.vehicle_name);
+}
+
+// Return the latest saved vehicle details for a normalized registration. The
+// type and phone are found independently so a newer visit with a blank phone
+// does not erase a number saved on an earlier visit.
+function getRememberedVehicleDetails(records, registration) {
+  if (!registration) return null;
+
+  const matches = records
+    .filter((item) => getItemRegistration(item) === registration)
+    .sort(
+      (a, b) =>
+        new Date(b.created_at || b.service_date).getTime() -
+        new Date(a.created_at || a.service_date).getTime()
+    );
+
+  if (matches.length === 0) return null;
+
+  const latestWithType = matches.find((item) => String(item.vehicle_type || "").trim());
+  const latestWithPhone = matches.find((item) => String(item.phone || "").trim());
+
+  return {
+    vehicleType: latestWithType?.vehicle_type || "",
+    phone: latestWithPhone?.phone || "",
+  };
+}
+
+// Loyalty starts with visits recorded after the program is enabled.
+// Three completed paid washes earn one free wash. Completing that free wash
+// resets the cycle for this registration number.
+function getLoyaltyStatus(records, registration) {
+  if (!registration) {
+    return { paidWashes: 0, freeWashDue: false, freeWashInProgress: false };
+  }
+
+  const matchingVisits = records
+    .filter(
+      (item) =>
+        item.loyalty_eligible === true &&
+        getItemRegistration(item) === registration
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.created_at || a.service_date).getTime() -
+        new Date(b.created_at || b.service_date).getTime()
+    );
+
+  let paidWashes = 0;
+  let freeWashInProgress = false;
+
+  for (const visit of matchingVisits) {
+    if (visit.is_free_wash === true) {
+      if (visit.status === "Completed") {
+        paidWashes = 0;
+        freeWashInProgress = false;
+      } else {
+        freeWashInProgress = true;
+      }
+    } else if (visit.status === "Completed" && Number(visit.amount) > 0) {
+      paidWashes += 1;
+    }
+  }
+
+  return {
+    paidWashes,
+    freeWashDue: paidWashes >= 3 && !freeWashInProgress,
+    freeWashInProgress,
+  };
+}
+
 function App() {
   const today = new Date().toLocaleDateString("en-CA");
 
@@ -38,6 +125,12 @@ function App() {
   });
 
   const [loading, setLoading] = useState(true);
+  const [memoryNotice, setMemoryNotice] = useState(null);
+  const [memoryCheckedRegistration, setMemoryCheckedRegistration] = useState("");
+
+  const currentRegistration = getVehicleRegistration(vehicle.name);
+  const currentLoyalty = getLoyaltyStatus(vehicles, currentRegistration);
+  const freeWashDue = currentLoyalty.freeWashDue;
 
   // Load vehicles from Supabase
   useEffect(() => {
@@ -53,6 +146,7 @@ function App() {
     if (error) {
       console.error("Error loading vehicles:", error);
       alert("Could not load vehicles.");
+      setLoading(false);
       return;
     }
 
@@ -60,81 +154,166 @@ function App() {
     setLoading(false);
   };
 
-  // Add vehicle
+  // Look up a previously saved registration after the records finish loading.
+  // A registration is checked once per value, so changes elsewhere in the app
+  // will not repeatedly overwrite details a worker has manually edited.
+  useEffect(() => {
+    const registration = getVehicleRegistration(vehicle.name);
+
+    if (!registration) {
+      if (memoryNotice !== null) setMemoryNotice(null);
+      if (memoryCheckedRegistration) setMemoryCheckedRegistration("");
+      return;
+    }
+
+    if (loading || registration === memoryCheckedRegistration) return;
+
+    const remembered = getRememberedVehicleDetails(vehicles, registration);
+    setMemoryCheckedRegistration(registration);
+
+    if (!remembered) {
+      setMemoryNotice({ kind: "new", registration });
+      return;
+    }
+
+    setVehicle((current) => {
+      // Do not apply a stale lookup if the worker has already changed plates.
+      if (getVehicleRegistration(current.name) !== registration) return current;
+
+      return {
+        ...current,
+        ...(remembered.vehicleType ? { type: remembered.vehicleType } : {}),
+        ...(remembered.phone ? { phone: remembered.phone } : {}),
+      };
+    });
+
+    setMemoryNotice({
+      kind: "found",
+      registration,
+      hasType: Boolean(remembered.vehicleType),
+      hasPhone: Boolean(remembered.phone),
+    });
+  }, [vehicle.name, vehicles, loading, memoryCheckedRegistration, memoryNotice]);
+
+  const handleVehicleNameChange = (e) => {
+    const nextName = e.target.value;
+    const oldRegistration = getVehicleRegistration(vehicle.name);
+    const nextRegistration = getVehicleRegistration(nextName);
+
+    if (oldRegistration && oldRegistration !== nextRegistration) {
+      // Avoid carrying the previous vehicle's type or phone to another plate.
+      setMemoryCheckedRegistration("");
+      setMemoryNotice(null);
+      setVehicle((current) => ({
+        ...current,
+        name: nextName,
+        type: "",
+        phone: "",
+      }));
+      return;
+    }
+
+    setVehicle((current) => ({ ...current, name: nextName }));
+  };
+
+  // Add vehicle through an atomic Supabase function. The database decides
+  // whether this visit is paid or the earned free wash, even if another worker
+  // has a more recent screen open.
   const addVehicle = async (e) => {
     e.preventDefault();
 
-    if (
-      !vehicle.name ||
-      !vehicle.type ||
-      !vehicle.worker ||
-      !vehicle.amount
-    ) {
+    const registration = getVehicleRegistration(vehicle.name);
+    const loyalty = getLoyaltyStatus(vehicles, registration);
+
+    if (!vehicle.name.trim() || !vehicle.type || !vehicle.worker) {
       alert("Please fill all required fields.");
       return;
     }
 
-    const { data, error } = await supabase
-      .from("vehicles")
-      .insert([
-        {
-          vehicle_name: vehicle.name,
-          vehicle_type: vehicle.type,
-          assigned_worker: vehicle.worker,
-          phone: vehicle.phone,
-          amount: Number(vehicle.amount),
-          status: "Washing",
-          service_date: today,
-        },
-      ])
-      .select()
-      .single();
+    if (!loyalty.freeWashDue && (vehicle.amount === "" || !Number.isFinite(Number(vehicle.amount)) || Number(vehicle.amount) <= 0)) {
+      alert("Enter an amount greater than zero for a paid wash.");
+      return;
+    }
+
+    if (loyalty.freeWashInProgress) {
+      alert("A free wash is already in progress for this vehicle. Complete it before adding another visit.");
+      return;
+    }
+
+    const { data, error } = await supabase.rpc("register_vehicle_visit", {
+      p_vehicle_name: vehicle.name.trim(),
+      p_vehicle_type: vehicle.type,
+      p_assigned_worker: vehicle.worker,
+      p_phone: vehicle.phone || null,
+      p_amount: loyalty.freeWashDue ? 0 : Number(vehicle.amount),
+      p_service_date: today,
+    });
 
     if (error) {
       console.error("Error adding vehicle:", error);
-      alert("Could not add vehicle.");
+      alert(error.message || "Could not add vehicle. Please refresh and try again.");
       return;
     }
 
-    setVehicles([data, ...vehicles]);
+    const newItem = Array.isArray(data) ? data[0] : data;
+    setVehicle({ name: "", type: "", worker: "", phone: "", amount: "" });
+    await loadVehicles();
 
-    setVehicle({
-      name: "",
-      type: "",
-      worker: "",
-      phone: "",
-      amount: "",
-    });
+    if (newItem?.is_free_wash && !loyalty.freeWashDue) {
+      alert("This vehicle had earned a free wash. The visit was saved as FREE (₹0).");
+    }
   };
 
-  // Mark completed
+  // Complete a visit and update loyalty progress in the same database transaction.
   const markCompleted = async (id) => {
-    const { error } = await supabase
-      .from("vehicles")
-      .update({ status: "Completed" })
-      .eq("id", id);
+    const { error } = await supabase.rpc("complete_wash_visit", {
+      p_vehicle_id: id,
+    });
 
     if (error) {
       console.error("Error updating status:", error);
-      alert("Could not update status.");
+      alert(error.message || "Could not update status. Please refresh and try again.");
       return;
     }
 
-    setVehicles(
-      vehicles.map((item) =>
-        item.id === id
-          ? { ...item, status: "Completed" }
-          : item
-      )
-    );
+    await loadVehicles();
   };
 
-  // Send WhatsApp
+  // Send WhatsApp with vehicle-specific loyalty progress
   const sendWhatsApp = (item) => {
-    const message =
-      "Hello! Your vehicle has been professionally cleaned and is ready for pickup. Thank you for choosing Wash Depot!";
+    const registration = getItemRegistration(item);
+    const loyalty = getLoyaltyStatus(vehicles, registration);
 
-    let phone = item.phone.replace(/\D/g, "");
+    let loyaltyMessage;
+    const progress = Math.min(loyalty.paidWashes, 3);
+    const remaining = 3 - progress;
+
+    if (item.is_free_wash === true) {
+      loyaltyMessage = progress === 0
+        ? "🎉 This visit was your FREE 4th wash! Your loyalty counter has reset to 0 of 3 paid washes for the next reward."
+        : `🎉 This visit was your FREE 4th wash! Your counter reset after redemption. Your next cycle is already at ${progress} of 3 paid washes.`;
+    } else if (!registration) {
+      loyaltyMessage =
+        "🎁 Wash Depot Loyalty Rewards: loyalty progress is tracked by vehicle registration number. Please make sure your registration is recorded on your next visit.";
+    } else if (loyalty.freeWashInProgress) {
+      loyaltyMessage =
+        "🎁 Wash Depot Loyalty Rewards: your free wash reward has been unlocked and a free wash is currently in progress for this vehicle.";
+    } else if (progress >= 3) {
+      loyaltyMessage =
+        "🎁 Wash Depot Loyalty Rewards: you have completed 3 paid washes! Your NEXT wash is FREE.";
+    } else {
+      loyaltyMessage = `🎁 Wash Depot Loyalty Rewards: ${progress} of 3 paid washes completed. ${remaining} more paid ${remaining === 1 ? "wash" : "washes"} until your next wash is FREE!`;
+    }
+
+    const message =
+      `Hello! Your vehicle has been professionally cleaned and is ready for pickup. Thank you for choosing Wash Depot!\n\n${loyaltyMessage}`;
+
+    let phone = String(item.phone || "").replace(/\D/g, "");
+
+    if (!phone) {
+      alert("This vehicle does not have a customer WhatsApp number saved.");
+      return;
+    }
 
     // Automatically add India country code for 10-digit numbers
     if (phone.length === 10) {
@@ -168,32 +347,44 @@ function App() {
     });
   };
 
-  // Save edit
+  // Save edits through a database function that protects completed loyalty visits.
   const saveEdit = async (id) => {
-    const { data, error } = await supabase
-      .from("vehicles")
-      .update({
-        vehicle_name: editVehicle.name,
-        vehicle_type: editVehicle.type,
-        assigned_worker: editVehicle.worker,
-        phone: editVehicle.phone,
-        amount: Number(editVehicle.amount),
-      })
-      .eq("id", id)
-      .select()
-      .single();
+    const originalItem = vehicles.find((item) => item.id === id);
+    const editedRegistration = getVehicleRegistration(editVehicle.name);
 
-    if (error) {
-      console.error("Error editing vehicle:", error);
-      alert("Could not save changes.");
+    if (originalItem && getItemRegistration(originalItem) && !editedRegistration) {
+      alert("Keep the vehicle registration number in the vehicle name so loyalty progress stays linked to the correct vehicle.");
       return;
     }
 
-    setVehicles(
-      vehicles.map((item) =>
-        item.id === id ? data : item
-      )
-    );
+    if (!originalItem?.is_free_wash && (!Number.isFinite(Number(editVehicle.amount)) || Number(editVehicle.amount) <= 0)) {
+      alert("Amount must be greater than zero for a paid wash.");
+      return;
+    }
+
+    const { data, error } = await supabase.rpc("update_wash_vehicle_details", {
+      p_vehicle_id: id,
+      p_vehicle_name: editVehicle.name.trim(),
+      p_vehicle_type: editVehicle.type,
+      p_assigned_worker: editVehicle.worker,
+      p_phone: editVehicle.phone || null,
+      p_amount: originalItem?.is_free_wash ? 0 : Number(editVehicle.amount),
+    });
+
+    if (error) {
+      console.error("Error editing vehicle:", error);
+      alert(error.message || "Could not save changes.");
+      return;
+    }
+
+    const updatedItem = Array.isArray(data) ? data[0] : data;
+    if (updatedItem) {
+      setVehicles((currentVehicles) =>
+        currentVehicles.map((item) => item.id === id ? updatedItem : item)
+      );
+    } else {
+      await loadVehicles();
+    }
 
     setEditingId(null);
   };
@@ -307,7 +498,7 @@ function App() {
                     <td>{item.vehicle_name}</td>
                     <td>{item.vehicle_type}</td>
                     <td>{item.assigned_worker}</td>
-                    <td>₹{item.amount}</td>
+                    <td>{item.is_free_wash ? <strong>FREE</strong> : `₹${item.amount}`}</td>
 
                     <td
                       className={
@@ -379,13 +570,48 @@ function App() {
           type="text"
           placeholder="e.g. KL 07 AB 1234 / Fortuner"
           value={vehicle.name}
-          onChange={(e) =>
-            setVehicle({
-              ...vehicle,
-              name: e.target.value,
-            })
-          }
+          onChange={handleVehicleNameChange}
         />
+
+        {memoryNotice && (
+          <p
+            className={`memory-notice memory-notice-${memoryNotice.kind}`}
+            role="status"
+          >
+            {memoryNotice.kind === "found" ? (
+              <>
+                <strong>Returning vehicle found: {memoryNotice.registration}.</strong>{" "}
+                {memoryNotice.hasType && memoryNotice.hasPhone
+                  ? "Vehicle type and customer number have been filled from a previous visit. Please verify them."
+                  : memoryNotice.hasType
+                    ? "Vehicle type has been filled in, but no customer number was saved before. Please enter it."
+                    : memoryNotice.hasPhone
+                      ? "Customer number has been filled in, but no vehicle type was saved before. Please select it."
+                      : "A previous visit was found, but it has no saved type or customer number. Please enter them."}
+              </>
+            ) : (
+              <>
+                <strong>New vehicle: {memoryNotice.registration}.</strong>{" "}
+                No previous visit was found. Enter its type and customer number; they can be remembered for the next visit.
+              </>
+            )}
+          </p>
+        )}
+
+        {currentRegistration ? (
+          <div className={`loyalty-status ${freeWashDue ? "loyalty-status-free" : ""}`}>
+            <strong>Wash Depot Rewards · {currentRegistration}</strong>
+            {freeWashDue ? (
+              <p>You have completed 3 paid washes. This visit will be FREE! The counter resets after this free wash is completed.</p>
+            ) : currentLoyalty.freeWashInProgress ? (
+              <p>A free wash is already in progress for this vehicle. Complete it before registering another visit.</p>
+            ) : (
+              <p>{Math.min(currentLoyalty.paidWashes, 3)} of 3 paid washes completed. {3 - Math.min(currentLoyalty.paidWashes, 3)} more paid {3 - Math.min(currentLoyalty.paidWashes, 3) === 1 ? "wash" : "washes"} until the next wash is free.</p>
+            )}
+          </div>
+        ) : (
+          <p className="loyalty-hint">Loyalty rewards are tracked by registration number. Enter the plate number first, e.g. KL 07 AB 1234 / Fortuner.</p>
+        )}
 
         <label>Vehicle Type</label>
 
@@ -441,12 +667,15 @@ function App() {
           }
         />
 
-        <label>Amount</label>
+        <label>{freeWashDue ? "Amount (Free Wash)" : "Amount"}</label>
 
         <input
           type="number"
-          placeholder="Enter amount"
-          value={vehicle.amount}
+          min={freeWashDue ? "0" : "0.01"}
+          step="0.01"
+          placeholder={freeWashDue ? "Free wash — ₹0" : "Enter amount"}
+          value={freeWashDue ? "0" : vehicle.amount}
+          disabled={freeWashDue}
           onChange={(e) =>
             setVehicle({
               ...vehicle,
@@ -455,7 +684,7 @@ function App() {
           }
         />
 
-        <button type="submit">
+        <button type="submit" disabled={currentLoyalty.freeWashInProgress}>
           Add Vehicle
         </button>
       </form>
@@ -537,7 +766,10 @@ function App() {
                           className="table-input"
                           name="amount"
                           type="number"
-                          value={editVehicle.amount}
+                          min={item.is_free_wash ? "0" : "0.01"}
+                          step="0.01"
+                          value={item.is_free_wash ? 0 : editVehicle.amount}
+                          disabled={item.is_free_wash}
                           onChange={handleEditChange}
                         />
                       </td>
@@ -574,7 +806,7 @@ function App() {
                       <td>{item.vehicle_name}</td>
                       <td>{item.vehicle_type}</td>
                       <td>{item.assigned_worker}</td>
-                      <td>₹{item.amount}</td>
+                      <td>{item.is_free_wash ? <strong>FREE</strong> : `₹${item.amount}`}</td>
 
                       <td
                         className={
