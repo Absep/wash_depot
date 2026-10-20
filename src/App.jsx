@@ -12,6 +12,13 @@ const vehicleTypes = [
   "Lorry / Bus",
 ];
 
+// Only these vehicle categories participate in Wash Depot Loyalty Rewards.
+const loyaltyVehicleTypes = new Set(["Bike", "Sedan", "SUV"]);
+
+function isLoyaltyEligibleType(type) {
+  return loyaltyVehicleTypes.has(String(type || "").trim());
+}
+
 // Accept common Indian registration formats. The app's vehicle field can contain
 // either a registration alone or "REGISTRATION / MODEL".
 function getVehicleRegistration(value) {
@@ -68,6 +75,7 @@ function getLoyaltyStatus(records, registration) {
     .filter(
       (item) =>
         item.loyalty_eligible === true &&
+        isLoyaltyEligibleType(item.vehicle_type) &&
         getItemRegistration(item) === registration
     )
     .sort(
@@ -130,7 +138,9 @@ function App() {
 
   const currentRegistration = getVehicleRegistration(vehicle.name);
   const currentLoyalty = getLoyaltyStatus(vehicles, currentRegistration);
-  const freeWashDue = currentLoyalty.freeWashDue;
+  const loyaltyEnabledForCurrentType = isLoyaltyEligibleType(vehicle.type);
+  const freeWashDue = loyaltyEnabledForCurrentType && currentLoyalty.freeWashDue;
+  const freeWashInProgress = loyaltyEnabledForCurrentType && currentLoyalty.freeWashInProgress;
 
   // Load vehicles from Supabase
   useEffect(() => {
@@ -224,18 +234,21 @@ function App() {
 
     const registration = getVehicleRegistration(vehicle.name);
     const loyalty = getLoyaltyStatus(vehicles, registration);
+    const loyaltyEnabledForVisit = isLoyaltyEligibleType(vehicle.type);
+    const freeWashDueForVisit = loyaltyEnabledForVisit && loyalty.freeWashDue;
+    const freeWashInProgressForVisit = loyaltyEnabledForVisit && loyalty.freeWashInProgress;
 
     if (!vehicle.name.trim() || !vehicle.type || !vehicle.worker) {
       alert("Please fill all required fields.");
       return;
     }
 
-    if (!loyalty.freeWashDue && (vehicle.amount === "" || !Number.isFinite(Number(vehicle.amount)) || Number(vehicle.amount) <= 0)) {
+    if (!freeWashDueForVisit && (vehicle.amount === "" || !Number.isFinite(Number(vehicle.amount)) || Number(vehicle.amount) <= 0)) {
       alert("Enter an amount greater than zero for a paid wash.");
       return;
     }
 
-    if (loyalty.freeWashInProgress) {
+    if (freeWashInProgressForVisit) {
       alert("A free wash is already in progress for this vehicle. Complete it before adding another visit.");
       return;
     }
@@ -245,7 +258,7 @@ function App() {
       p_vehicle_type: vehicle.type,
       p_assigned_worker: vehicle.worker,
       p_phone: vehicle.phone || null,
-      p_amount: loyalty.freeWashDue ? 0 : Number(vehicle.amount),
+      p_amount: freeWashDueForVisit ? 0 : Number(vehicle.amount),
       p_service_date: today,
     });
 
@@ -259,7 +272,7 @@ function App() {
     setVehicle({ name: "", type: "", worker: "", phone: "", amount: "" });
     await loadVehicles();
 
-    if (newItem?.is_free_wash && !loyalty.freeWashDue) {
+    if (newItem?.is_free_wash && !freeWashDueForVisit) {
       alert("This vehicle had earned a free wash. The visit was saved as FREE (₹0).");
     }
   };
@@ -292,6 +305,8 @@ function App() {
       loyaltyMessage = progress === 0
         ? "🎉 This visit was your FREE 4th wash! Your loyalty counter has reset to 0 of 3 paid washes for the next reward."
         : `🎉 This visit was your FREE 4th wash! Your counter reset after redemption. Your next cycle is already at ${progress} of 3 paid washes.`;
+    } else if (!isLoyaltyEligibleType(item.vehicle_type)) {
+      loyaltyMessage = "🎁 Wash Depot Loyalty Rewards are available for Sedan, SUV and Bike only. This vehicle type is not included in the loyalty program.";
     } else if (!registration) {
       loyaltyMessage =
         "🎁 Wash Depot Loyalty Rewards: loyalty progress is tracked by vehicle registration number. Please make sure your registration is recorded on your next visit.";
@@ -598,19 +613,24 @@ function App() {
           </p>
         )}
 
-        {currentRegistration ? (
+        {currentRegistration && loyaltyEnabledForCurrentType ? (
           <div className={`loyalty-status ${freeWashDue ? "loyalty-status-free" : ""}`}>
             <strong>Wash Depot Rewards · {currentRegistration}</strong>
             {freeWashDue ? (
               <p>You have completed 3 paid washes. This visit will be FREE! The counter resets after this free wash is completed.</p>
-            ) : currentLoyalty.freeWashInProgress ? (
+            ) : freeWashInProgress ? (
               <p>A free wash is already in progress for this vehicle. Complete it before registering another visit.</p>
             ) : (
               <p>{Math.min(currentLoyalty.paidWashes, 3)} of 3 paid washes completed. {3 - Math.min(currentLoyalty.paidWashes, 3)} more paid {3 - Math.min(currentLoyalty.paidWashes, 3) === 1 ? "wash" : "washes"} until the next wash is free.</p>
             )}
           </div>
+        ) : currentRegistration && vehicle.type ? (
+          <div className="loyalty-status">
+            <strong>Wash Depot Rewards</strong>
+            <p>Loyalty rewards are available for Sedan, SUV and Bike only. This {vehicle.type} visit will not earn or redeem a reward.</p>
+          </div>
         ) : (
-          <p className="loyalty-hint">Loyalty rewards are tracked by registration number. Enter the plate number first, e.g. KL 07 AB 1234 / Fortuner.</p>
+          <p className="loyalty-hint">Loyalty rewards are available for Sedan, SUV and Bike only, and are tracked by registration number.</p>
         )}
 
         <label>Vehicle Type</label>
@@ -684,7 +704,7 @@ function App() {
           }
         />
 
-        <button type="submit" disabled={currentLoyalty.freeWashInProgress}>
+        <button type="submit" disabled={freeWashInProgress}>
           Add Vehicle
         </button>
       </form>
