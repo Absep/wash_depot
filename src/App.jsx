@@ -431,8 +431,21 @@ function App() {
       loyaltyMessage = `🎁 Wash Depot Loyalty Rewards: ${progress} of 3 paid washes completed. ${remaining} more paid ${remaining === 1 ? "wash" : "washes"} until your next wash is FREE!`;
     }
 
-    const message =
-      `Hello! Your vehicle has been professionally cleaned and is ready for pickup. Thank you for choosing Wash Depot!\n\n${loyaltyMessage}`;
+    const anniversaryMessage = [
+      "🎉 *WASH DEPOT — CELEBRATING 30 YEARS!*",
+      "As part of our 30th Anniversary celebrations, enjoy our special loyalty rewards:",
+      "🎁 *Get 1 FREE WASH after every 3 completed paid washes!*",
+      "*Eligible vehicles: Bikes, Sedans and SUVs.*",
+      "Loyalty progress is tracked separately for each vehicle registration number.",
+    ].join("\n");
+
+    const message = [
+      "Hello! Your vehicle has been professionally cleaned and is ready for pickup. Thank you for choosing Wash Depot!",
+      anniversaryMessage,
+      loyaltyMessage,
+      "Thank you for being part of our journey. Here's to many more years together!",
+      "❤️ *Team Wash Depot*",
+    ].join("\n\n");
 
     let phone = String(item.phone || "").replace(/\D/g, "");
 
