@@ -80,10 +80,14 @@ function normalizePhone(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function getItemServiceDate(item) {
+  return String(item.service_date || item.created_at || "").slice(0, 10);
+}
+
 function formatVisitDate(item) {
-  const date = item.service_date || item.created_at;
+  const date = getItemServiceDate(item);
   if (!date) return "Unknown date";
-  const parsed = new Date(`${String(date).slice(0, 10)}T00:00:00`);
+  const parsed = new Date(`${date}T00:00:00`);
   return Number.isNaN(parsed.getTime()) ? "Unknown date" : parsed.toLocaleDateString("en-IN");
 }
 
@@ -382,10 +386,21 @@ function App() {
     if (error) {
       console.error("Error updating status:", error);
       alert(error.message || "Could not update status. Please refresh and try again.");
-      return;
+      return false;
     }
 
     await loadVehicles();
+    return true;
+  };
+
+  // Old visits can remain marked Washing when the team forgets to update them.
+  // Only mark them completed after confirming the wash really happened.
+  const markOverdueCompleted = async (item) => {
+    const confirmed = window.confirm(
+      `Mark ${getItemDisplayName(item)} from ${formatVisitDate(item)} as completed?\n\nOnly continue if the vehicle was actually washed. This will update its loyalty progress if eligible.`
+    );
+    if (!confirmed) return;
+    await markCompleted(item.id);
   };
 
   // Send WhatsApp with vehicle-specific loyalty progress
@@ -511,6 +526,17 @@ function App() {
   const todaysVehicles = vehicles.filter(
     (item) => item.service_date === today
   );
+
+  // Previous-date visits still marked Washing are surfaced here so the owner
+  // can correct forgotten statuses without deleting or recreating any records.
+  const overdueWashingVehicles = vehicles
+    .filter(
+      (item) =>
+        item.status === "Washing" &&
+        getItemServiceDate(item) !== "" &&
+        getItemServiceDate(item) < today
+    )
+    .sort((a, b) => getItemServiceDate(a).localeCompare(getItemServiceDate(b)));
 
   const todaysTotal = todaysVehicles.reduce(
     (sum, item) => sum + Number(item.amount),
@@ -919,6 +945,40 @@ function App() {
           Add Vehicle
         </button>
       </form>
+
+      {overdueWashingVehicles.length > 0 && (
+        <section className="overdue-section" aria-labelledby="overdue-heading">
+          <div className="overdue-heading-row">
+            <div>
+              <p className="eyebrow">NEEDS ATTENTION</p>
+              <h2 id="overdue-heading">Previous unfinished visits</h2>
+              <p className="overdue-description">
+                These visits are from earlier dates but are still marked as Washing. If the wash was actually done, mark it completed here so the vehicle can be registered again.
+              </p>
+            </div>
+            <span className="overdue-count">{overdueWashingVehicles.length} pending</span>
+          </div>
+
+          <div className="overdue-list">
+            {overdueWashingVehicles.map((item) => (
+              <article className="overdue-item" key={item.id}>
+                <div className="overdue-item-details">
+                  <strong>{getItemDisplayName(item)}</strong>
+                  <span>{[item.vehicle_type, item.assigned_worker].filter(Boolean).join(" · ")}</span>
+                  <span>{formatVisitDate(item)} · {item.is_free_wash ? "FREE wash" : `₹${Number(item.amount || 0).toLocaleString("en-IN")}`}</span>
+                </div>
+                <button
+                  type="button"
+                  className="overdue-complete-button"
+                  onClick={() => markOverdueCompleted(item)}
+                >
+                  Mark completed
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
 
       <hr />
 

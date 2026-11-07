@@ -324,3 +324,92 @@ button, summary {
     transition-duration: .01ms !important;
   }
 }
+
+/* Previous-day visits that were left in the Washing state */
+.overdue-section {
+  margin: 28px 0 34px;
+  padding: 22px;
+  border: 1px solid #f0d7a8;
+  border-radius: 16px;
+  background: #fffaf1;
+}
+.overdue-heading-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+.overdue-heading-row .eyebrow { color: #9a5b00; }
+.overdue-heading-row h2 {
+  margin: 0 0 7px;
+  font-size: 19px;
+}
+.overdue-description {
+  max-width: 760px;
+  margin: 0;
+  color: #765b32;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.overdue-count {
+  flex: 0 0 auto;
+  padding: 7px 11px;
+  border: 1px solid #efd4a3;
+  border-radius: 999px;
+  background: #fff2d8;
+  color: #855000;
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+.overdue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.overdue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 15px;
+  border: 1px solid #eee2cf;
+  border-radius: 12px;
+  background: #fff;
+}
+.overdue-item-details {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+.overdue-item-details strong {
+  color: #191919;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.overdue-item-details span {
+  color: #6b6256;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.overdue-complete-button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--wd-red);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 750;
+}
+.overdue-complete-button:hover { background: var(--wd-red-dark); }
+@media (max-width: 560px) {
+  .overdue-section { margin: 22px 0 28px; padding: 15px; }
+  .overdue-heading-row { flex-direction: column; gap: 10px; }
+  .overdue-item { align-items: stretch; flex-direction: column; gap: 12px; }
+  .overdue-complete-button { width: 100%; min-height: 46px; }
+}
