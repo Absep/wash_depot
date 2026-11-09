@@ -114,7 +114,7 @@ function CustomerCheckInPage() {
     return (
       <main className="public-checkin-shell">
         <section className="public-checkin-card public-checkin-success">
-          <div className="public-brand-mark">WD</div>
+          <img className="public-brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
           <p className="public-eyebrow">WASH DEPOT · 30 YEARS</p>
           <div className="checkin-success-icon">✓</div>
           <h1>Check-in submitted!</h1>
@@ -129,7 +129,7 @@ function CustomerCheckInPage() {
   return (
     <main className="public-checkin-shell">
       <section className="public-checkin-card">
-        <div className="public-brand-mark">WD</div>
+        <img className="public-brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
         <p className="public-eyebrow">CELEBRATING 30 YEARS</p>
         <h1>Welcome to Wash Depot</h1>
         <p className="public-checkin-intro">Scan, enter your details and check in. Our team will confirm your vehicle when it arrives.</p>
@@ -179,7 +179,7 @@ function StaffLogin({ onSuccess }) {
   return (
     <main className="staff-login-shell">
       <section className="staff-login-card">
-        <div className="public-brand-mark">WD</div>
+        <img className="public-brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
         <p className="public-eyebrow">WASH DEPOT · OWNER ACCESS</p>
         <h1>Sign in</h1>
         <p>Use the Wash Depot owner account to open the management dashboard.</p>
@@ -211,7 +211,7 @@ function StaffGate() {
       .select("user_id, display_name, role, is_active")
       .eq("user_id", nextSession.user.id)
       .maybeSingle();
-    if (error || !data || data.is_active !== true) {
+    if (error || !data || data.is_active !== true || data.role !== "owner") {
       await supabase.auth.signOut();
       setSession(null);
       setProfile(null);
@@ -326,6 +326,10 @@ function getItemServiceDate(item) {
   return String(item.service_date || item.created_at || "").slice(0, 10);
 }
 
+function getDisplayStatus(status) {
+  return status === "Cancelled" ? "Not washed" : status;
+}
+
 function formatVisitDate(item) {
   const date = getItemServiceDate(item);
   if (!date) return "Unknown date";
@@ -369,10 +373,11 @@ function makeVehicleLookupGroups(records, query) {
     });
     if (!(matchRegistration || matchLegacyName || matchModel || matchPhone)) continue;
 
-    const totalSpend = items.filter((item) => item.is_free_wash !== true).reduce((sum, item) => sum + Math.max(0, Number(item.amount) || 0), 0);
+    const nonCancelledItems = items.filter((item) => item.status !== "Cancelled");
+    const totalSpend = nonCancelledItems.filter((item) => item.is_free_wash !== true).reduce((sum, item) => sum + Math.max(0, Number(item.amount) || 0), 0);
     groups.push({
       key, registration, model, phone, vehicleType: typeItem?.vehicle_type || latest.vehicle_type || "",
-      latest, visits: items, totalVisits: items.length, totalSpend,
+      latest, visits: items, totalVisits: nonCancelledItems.length, totalSpend,
       loyalty: getLoyaltyStatus(records, registration),
     });
   }
@@ -404,6 +409,7 @@ function getLoyaltyStatus(records, registration) {
   let freeWashInProgress = false;
 
   for (const visit of matchingVisits) {
+    if (visit.status === "Cancelled") continue;
     if (visit.is_free_wash === true) {
       if (visit.status === "Completed") {
         paidWashes = 0;
@@ -457,6 +463,7 @@ function Dashboard({ staffProfile, onSignOut }) {
   const [memoryCheckedRegistration, setMemoryCheckedRegistration] = useState("");
   const [showLookup, setShowLookup] = useState(false);
   const [lookupQuery, setLookupQuery] = useState("");
+  const [visitActionBusy, setVisitActionBusy] = useState(false);
 
   const currentRegistration = getVehicleRegistration(vehicle.registration);
   const currentLoyalty = getLoyaltyStatus(vehicles, currentRegistration);
@@ -555,7 +562,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error accepting customer check-in:", error);
-      alert(error.message || "Could not accept this check-in. Refresh and try again.");
+      alert("Could not add this vehicle. Please try again.");
       return;
     }
 
@@ -565,15 +572,15 @@ function Dashboard({ staffProfile, onSignOut }) {
       return next;
     });
     await Promise.all([loadVehicles(), loadPendingCheckins()]);
-    alert(freeWashDueForVisit ? "Check-in accepted. This vehicle's earned reward has been applied as a free wash." : "Customer check-in accepted and added to today's vehicles.");
+    // The accepted check-in disappears from the queue and appears in Today's Vehicles.
   };
 
   const rejectCustomerCheckin = async (checkin) => {
-    const confirmed = window.confirm(`Reject the check-in for ${checkin.registration}? No vehicle visit or loyalty credit will be created.`);
+    const confirmed = window.confirm(`Remove check-in for ${checkin.registration}?`);
     if (!confirmed) return;
     const { error } = await supabase.rpc("reject_customer_checkin", { p_checkin_id: checkin.id });
     if (error) {
-      alert(error.message || "Could not reject this check-in.");
+      alert("Could not remove this check-in. Please try again.");
       return;
     }
     await loadPendingCheckins();
@@ -636,7 +643,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
   const useLookupVehicle = (group) => {
     if (!group.registration) {
-      alert("This old record has no recognizable registration number. Enter the registration manually before using vehicle memory and loyalty rewards.");
+      alert("Please enter the vehicle registration number first.");
       return;
     }
     setVehicle((current) => ({
@@ -698,7 +705,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error adding vehicle:", error);
-      alert(error.message || "Could not add vehicle. Please refresh and try again.");
+      alert("Could not add this vehicle. Please check the details and try again.");
       return;
     }
 
@@ -721,7 +728,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error updating status:", error);
-      alert(error.message || "Could not update status. Please refresh and try again.");
+      alert("Could not mark this vehicle as completed. Please try again.");
       return false;
     }
 
@@ -733,10 +740,52 @@ function Dashboard({ staffProfile, onSignOut }) {
   // Only mark them completed after confirming the wash really happened.
   const markOverdueCompleted = async (item) => {
     const confirmed = window.confirm(
-      `Mark ${getItemDisplayName(item)} from ${formatVisitDate(item)} as completed?\n\nOnly continue if the vehicle was actually washed. This will update its loyalty progress if eligible.`
+      `Mark ${getItemDisplayName(item)} as completed?`
     );
     if (!confirmed) return;
     await markCompleted(item.id);
+  };
+
+  // Cancel a visit that was entered but not actually washed. It remains in history,
+  // is excluded from revenue/loyalty, and releases a reserved free wash if applicable.
+  const cancelVisit = async (item) => {
+    if (item.status !== "Washing") return;
+    if (!window.confirm(`Mark ${getItemDisplayName(item)} as not washed?`)) return;
+
+    setVisitActionBusy(true);
+    const { error } = await supabase.rpc("cancel_wash_visit", {
+      p_vehicle_id: item.id,
+      // Save a standard audit note; no extra question for the owner.
+      p_reason: "Marked not washed by owner",
+    });
+    setVisitActionBusy(false);
+    if (error) {
+      console.error("Error cancelling visit:", error);
+      alert("Could not update this visit. Please try again.");
+      return;
+    }
+    await loadVehicles();
+  };
+
+  // Undo only the latest completed visit for a registration. The database checks
+  // ordering and reverses loyalty in the same transaction as reopening the visit.
+  const undoCompletion = async (item) => {
+    if (item.status !== "Completed") return;
+    if (!window.confirm(`Move ${getItemDisplayName(item)} back to Washing?`)) return;
+
+    setVisitActionBusy(true);
+    const { error } = await supabase.rpc("undo_complete_wash_visit", {
+      p_vehicle_id: item.id,
+      // Save a standard audit note; no extra question for the owner.
+      p_reason: "Reopened by owner",
+    });
+    setVisitActionBusy(false);
+    if (error) {
+      console.error("Error reopening visit:", error);
+      alert("Could not update this visit. Please try again.");
+      return;
+    }
+    await loadVehicles();
   };
 
   // Send WhatsApp with the 30th Anniversary promotion and current vehicle loyalty progress.
@@ -838,7 +887,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error editing vehicle:", error);
-      alert(error.message || "Could not save changes.");
+      alert("Could not save changes. Please try again.");
       return;
     }
 
@@ -873,13 +922,13 @@ function Dashboard({ staffProfile, onSignOut }) {
     .sort((a, b) => getItemServiceDate(a).localeCompare(getItemServiceDate(b)));
 
   const todaysTotal = todaysVehicles.reduce(
-    (sum, item) => sum + Number(item.amount),
+    (sum, item) => sum + (item.status === "Cancelled" ? 0 : Number(item.amount)),
     0
   );
 
   const todaysWorkerTotals = workers.map((worker) => {
     const workerVehicles = todaysVehicles.filter(
-      (item) => item.assigned_worker === worker
+      (item) => item.assigned_worker === worker && item.status !== "Cancelled"
     );
 
     return {
@@ -898,13 +947,13 @@ function Dashboard({ staffProfile, onSignOut }) {
   );
 
   const historyTotal = historyVehicles.reduce(
-    (sum, item) => sum + Number(item.amount),
+    (sum, item) => sum + (item.status === "Cancelled" ? 0 : Number(item.amount)),
     0
   );
 
   const historyWorkerTotals = workers.map((worker) => {
     const workerVehicles = historyVehicles.filter(
-      (item) => item.assigned_worker === worker
+      (item) => item.assigned_worker === worker && item.status !== "Cancelled"
     );
 
     return {
@@ -925,9 +974,8 @@ function Dashboard({ staffProfile, onSignOut }) {
       <div className="app">
         <header className="app-header">
           <div className="brand-lockup">
-            <div className="brand-symbol" aria-hidden="true">WD</div>
+            <img className="brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
             <div className="brand-copy">
-              <h1>WASH DEPOT</h1>
               <p className="subtitle">Customer &amp; Vehicle Lookup</p>
             </div>
           </div>
@@ -941,14 +989,14 @@ function Dashboard({ staffProfile, onSignOut }) {
             placeholder="e.g. KL71J6430 or 9876543210"
             onChange={(e) => setLookupQuery(e.target.value)}
           />
-          <p className="lookup-help">Search by plate or at least the last 4 digits of the phone number. Results include previous visits and loyalty progress.</p>
+          <p className="lookup-help">Search by registration number or phone number.</p>
         </div>
         {loading ? (
           <p>Loading saved vehicle records…</p>
         ) : !lookupQuery.trim() ? (
-          <p>Enter a registration number or phone number to find saved details.</p>
+          <p>Enter a registration number or phone number.</p>
         ) : lookupGroups.length === 0 ? (
-          <p>No matching customer or vehicle found.</p>
+          <p>No vehicle found.</p>
         ) : (
           <div className="lookup-results">
             {lookupGroups.map((group) => {
@@ -969,11 +1017,11 @@ function Dashboard({ staffProfile, onSignOut }) {
                     <div><span>Last worker</span><strong>{group.latest.assigned_worker || "Not saved"}</strong></div>
                     <div><span>Last visit amount</span><strong>{group.latest.is_free_wash ? "FREE" : `₹${Number(group.latest.amount || 0).toLocaleString("en-IN")}`}</strong></div>
                     <div><span>Total visits recorded</span><strong>{group.totalVisits}</strong></div>
-                    <div><span>Total non-free spend recorded</span><strong>₹{group.totalSpend.toLocaleString("en-IN")}</strong></div>
+                    <div><span>Total spent</span><strong>₹{group.totalSpend.toLocaleString("en-IN")}</strong></div>
                   </div>
                   <div className="lookup-loyalty">
                     <strong>Loyalty</strong>
-                    <p>{!group.registration ? "Registration is missing; loyalty can't be safely matched." : !eligible ? `${group.vehicleType || "This type"} is not eligible. Rewards apply to Bike, Sedan and SUV.` : group.loyalty.freeWashInProgress ? "A free wash is currently in progress." : group.loyalty.freeWashDue ? "FREE wash earned — next eligible visit should redeem it." : `${paidProgress} of 4 completed paid washes toward the next free wash.`}</p>
+                    <p>{!group.registration ? "No registration saved." : !eligible ? "No reward for this vehicle type." : group.loyalty.freeWashInProgress ? "Free wash in progress." : group.loyalty.freeWashDue ? "Free wash available." : `${paidProgress}/4 washes. ${4 - paidProgress} more for a free wash.`}</p>
                   </div>
                   <details className="lookup-history">
                     <summary>Visit history ({group.visits.length})</summary>
@@ -983,7 +1031,7 @@ function Dashboard({ staffProfile, onSignOut }) {
                         <tbody>{group.visits.map((item) => (
                           <tr key={item.id}>
                             <td>{formatVisitDate(item)}</td><td>{getItemModel(item) || "—"}</td><td>{item.vehicle_type || "—"}</td><td>{item.assigned_worker || "—"}</td>
-                            <td>{item.is_free_wash ? "FREE" : `₹${Number(item.amount || 0).toLocaleString("en-IN")}`}</td><td>{item.status}</td>
+                            <td>{item.is_free_wash ? "FREE" : `₹${Number(item.amount || 0).toLocaleString("en-IN")}`}</td><td>{getDisplayStatus(item.status)}</td>
                           </tr>
                         ))}</tbody>
                       </table>
@@ -1004,9 +1052,8 @@ function Dashboard({ staffProfile, onSignOut }) {
       <div className="app">
         <header className="app-header">
           <div className="brand-lockup">
-            <div className="brand-symbol" aria-hidden="true">WD</div>
+            <img className="brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
             <div className="brand-copy">
-              <h1>WASH DEPOT</h1>
               <p className="subtitle">Vehicle History</p>
             </div>
           </div>
@@ -1051,6 +1098,7 @@ function Dashboard({ staffProfile, onSignOut }) {
                   <th>Worker</th>
                   <th>Amount</th>
                   <th>Status</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
 
@@ -1062,14 +1110,19 @@ function Dashboard({ staffProfile, onSignOut }) {
                     <td>{item.assigned_worker}</td>
                     <td>{item.is_free_wash ? <strong>FREE</strong> : `₹${item.amount}`}</td>
 
-                    <td
-                      className={
-                        item.status === "Completed"
-                          ? "completed"
-                          : "washing"
-                      }
-                    >
-                      {item.status}
+                    <td className={item.status === "Completed" ? "completed" : item.status === "Cancelled" ? "cancelled" : "washing"}>
+                      {getDisplayStatus(item.status)}
+                    </td>
+                    <td>
+                      {item.status === "Washing" && (
+                        <div className="visit-correction-actions">
+                          <button type="button" className="small-button" disabled={visitActionBusy} onClick={() => markOverdueCompleted(item)}>Completed</button>
+                          <button type="button" className="visit-cancel-button" disabled={visitActionBusy} onClick={() => cancelVisit(item)}>Not washed</button>
+                        </div>
+                      )}
+                      {item.status === "Completed" && (
+                        <button type="button" className="visit-undo-button" disabled={visitActionBusy} onClick={() => undoCompletion(item)}>Mark as Washing</button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1120,12 +1173,11 @@ function Dashboard({ staffProfile, onSignOut }) {
     <div className="app">
       <header className="app-header">
         <div className="brand-lockup">
-          <div className="brand-symbol" aria-hidden="true">WD</div>
-          <div className="brand-copy">
-            <h1>WASH DEPOT</h1>
-            <p className="subtitle">Vehicle Service Management</p>
+            <img className="brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
+            <div className="brand-copy">
+              <p className="subtitle">Vehicle Service Management</p>
+            </div>
           </div>
-        </div>
         <div className="header-controls"><span className="header-tag">CAR CARE MANAGEMENT</span><span className="staff-name">{staffProfile?.display_name || "Owner"}</span><button type="button" className="header-signout" onClick={onSignOut}>Sign out</button></div>
       </header>
 
@@ -1172,6 +1224,19 @@ function Dashboard({ staffProfile, onSignOut }) {
                     <span className={`model-match ${inferredType ? "model-match-found" : "model-match-review"}`}>
                       {inferredType ? `Suggested: ${inferredType}` : "Needs category check"}
                     </span>
+                  </div>
+                  <div className="checkin-loyalty-status" role="status">
+                    {!selectedType ? (
+                      <span>Select the vehicle category to see its loyalty progress.</span>
+                    ) : !isLoyaltyEligibleType(selectedType) ? (
+                      <span>Loyalty rewards are not available for this vehicle type.</span>
+                    ) : loyalty.freeWashInProgress ? (
+                      <strong>A free wash is already in progress for this vehicle.</strong>
+                    ) : loyalty.freeWashDue ? (
+                      <strong>🎉 Free wash earned! This visit will be FREE.</strong>
+                    ) : (
+                      <strong>🎁 {loyalty.paidWashes} of 4 paid washes completed · {4 - loyalty.paidWashes} more {4 - loyalty.paidWashes === 1 ? "wash" : "washes"} until the next wash is free.</strong>
+                    )}
                   </div>
                   <div className="checkin-controls">
                     <label>Confirm vehicle category
@@ -1347,9 +1412,9 @@ function Dashboard({ staffProfile, onSignOut }) {
           <div className="overdue-heading-row">
             <div>
               <p className="eyebrow">NEEDS ATTENTION</p>
-              <h2 id="overdue-heading">Previous unfinished visits</h2>
+              <h2 id="overdue-heading">Older unfinished vehicles</h2>
               <p className="overdue-description">
-                These visits are from earlier dates but are still marked as Washing. If the wash was actually done, mark it completed here so the vehicle can be registered again.
+                These vehicles were left as Washing on an earlier day. Update them below.
               </p>
             </div>
             <span className="overdue-count">{overdueWashingVehicles.length} pending</span>
@@ -1363,13 +1428,24 @@ function Dashboard({ staffProfile, onSignOut }) {
                   <span>{[item.vehicle_type, item.assigned_worker].filter(Boolean).join(" · ")}</span>
                   <span>{formatVisitDate(item)} · {item.is_free_wash ? "FREE wash" : `₹${Number(item.amount || 0).toLocaleString("en-IN")}`}</span>
                 </div>
-                <button
-                  type="button"
-                  className="overdue-complete-button"
-                  onClick={() => markOverdueCompleted(item)}
-                >
-                  Mark completed
-                </button>
+                <div className="visit-correction-actions">
+                  <button
+                    type="button"
+                    className="overdue-complete-button"
+                    disabled={visitActionBusy}
+                    onClick={() => markOverdueCompleted(item)}
+                  >
+                    Mark completed
+                  </button>
+                  <button
+                    type="button"
+                    className="visit-cancel-button"
+                    disabled={visitActionBusy}
+                    onClick={() => cancelVisit(item)}
+                  >
+                    Not washed
+                  </button>
+                </div>
               </article>
             ))}
           </div>
@@ -1457,7 +1533,7 @@ function Dashboard({ staffProfile, onSignOut }) {
                         />
                       </td>
 
-                      <td>{item.status}</td>
+                      <td>{getDisplayStatus(item.status)}</td>
 
                       <td>
                         <input
@@ -1491,14 +1567,8 @@ function Dashboard({ staffProfile, onSignOut }) {
                       <td>{item.assigned_worker}</td>
                       <td>{item.is_free_wash ? <strong>FREE</strong> : `₹${item.amount}`}</td>
 
-                      <td
-                        className={
-                          item.status === "Completed"
-                            ? "completed"
-                            : "washing"
-                        }
-                      >
-                        {item.status}
+                      <td className={item.status === "Completed" ? "completed" : item.status === "Cancelled" ? "cancelled" : "washing"}>
+                        {getDisplayStatus(item.status)}
                       </td>
 
                       <td>
@@ -1511,25 +1581,19 @@ function Dashboard({ staffProfile, onSignOut }) {
                           Edit
                         </button>
 
-                        {item.status === "Washing" ? (
-                          <button
-                            className="small-button"
-                            onClick={() =>
-                              markCompleted(item.id)
-                            }
-                          >
-                            Completed
-                          </button>
-                        ) : (
-                          <button
-                            className="whatsapp-button"
-                            onClick={() =>
-                              sendWhatsApp(item)
-                            }
-                          >
-                            WhatsApp
-                          </button>
+                        {item.status === "Washing" && (
+                          <div className="visit-correction-actions">
+                            <button type="button" className="small-button" disabled={visitActionBusy} onClick={() => markCompleted(item.id)}>Completed</button>
+                            <button type="button" className="visit-cancel-button" disabled={visitActionBusy} onClick={() => cancelVisit(item)}>Not washed</button>
+                          </div>
                         )}
+                        {item.status === "Completed" && (
+                          <div className="visit-correction-actions">
+                            <button type="button" className="whatsapp-button" onClick={() => sendWhatsApp(item)}>WhatsApp</button>
+                            <button type="button" className="visit-undo-button" disabled={visitActionBusy} onClick={() => undoCompletion(item)}>Mark as Washing</button>
+                          </div>
+                        )}
+                        {item.status === "Cancelled" && <span className="cancelled-label">Not washed</span>}
                       </td>
                     </>
                   )}
