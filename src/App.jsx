@@ -12,6 +12,248 @@ const vehicleTypes = [
   "Lorry / Bus",
 ];
 
+
+const LOYALTY_REQUIRED_PAID_WASHES = 4;
+
+// Hardcoded model suggestions and business-specific category mapping.
+// These are suggestions only; staff confirm the category before accepting a check-in.
+const vehicleModelsByType = {
+  Bike: [
+    "Hero Splendor", "Hero Passion", "Hero Glamour", "Honda Activa", "Honda Dio", "Honda Shine",
+    "Honda Unicorn", "TVS Jupiter", "TVS Apache RTR", "TVS Ntorq", "Bajaj Pulsar", "Bajaj Platina",
+    "Royal Enfield Classic 350", "Royal Enfield Hunter 350", "Royal Enfield Meteor 350", "Royal Enfield Bullet 350",
+    "KTM Duke", "KTM RC", "Yamaha R15", "Yamaha FZ", "Suzuki Access", "Suzuki Burgman",
+    "Ather 450X", "Ola S1", "Bajaj Chetak"
+  ],
+  Sedan: [
+    "Maruti S-Presso", "Maruti Alto", "Maruti WagonR", "Maruti Swift", "Maruti Baleno", "Maruti Dzire",
+    "Maruti Celerio", "Maruti Ignis", "Hyundai Santro", "Hyundai i10", "Hyundai Grand i10", "Hyundai i20",
+    "Hyundai Aura", "Hyundai Xcent", "Hyundai Verna", "Honda Amaze", "Honda City", "Honda Civic",
+    "Volkswagen Virtus", "Volkswagen Vento", "Skoda Slavia", "Skoda Rapid", "Tata Tiago", "Tata Tigor",
+    "Toyota Etios", "Toyota Corolla", "Renault Kwid", "Datsun Go"
+  ],
+  SUV: [
+    "Hyundai Creta", "Hyundai Venue", "Hyundai Alcazar", "Kia Seltos", "Kia Sonet", "Kia Carens",
+    "Toyota Fortuner", "Toyota Innova", "Toyota Hyryder", "Toyota Urban Cruiser", "Mahindra Scorpio",
+    "Mahindra Scorpio N", "Mahindra Thar", "Mahindra XUV700", "Mahindra XUV300", "Mahindra Bolero",
+    "Tata Nexon", "Tata Punch", "Tata Harrier", "Tata Safari", "Maruti Brezza", "Maruti Fronx",
+    "Maruti Grand Vitara", "Maruti Jimny", "MG Hector", "MG Astor", "MG Gloster", "Jeep Compass",
+    "Jeep Meridian", "Renault Duster", "Nissan Magnite", "Nissan Kicks", "Force Gurkha"
+  ],
+  Pickup: [
+    "Mahindra Bolero Pik-Up", "Mahindra Veero", "Tata Yodha", "Isuzu D-Max", "Toyota Hilux", "Mahindra Supro"
+  ],
+  "Lorry / Bus": [
+    "Tata 407", "Tata 709", "Tata LPT", "Tata Prima", "Ashok Leyland Dost", "Ashok Leyland Partner",
+    "Ashok Leyland Viking", "Eicher Pro", "BharatBenz Truck", "Force Traveller", "School Bus", "Tourist Bus"
+  ]
+};
+
+const allVehicleModelSuggestions = [...vehicleModelsByType.Sedan, ...vehicleModelsByType.SUV];
+const vehicleModelAliases = {
+  Bike: ["splendor", "passion", "glamour", "activa", "dio", "shine", "unicorn", "jupiter", "apache", "ntorq", "pulsar", "platina", "classic350", "hunter350", "meteor350", "bullet350", "duke", "rc", "r15", "fz", "access", "burgman", "450x", "olas1", "chetak"],
+  Sedan: ["spresso", "alto", "wagonr", "swift", "baleno", "dzire", "celerio", "ignis", "santro", "i10", "grand i10", "i20", "aura", "xcent", "verna", "amaze", "city", "civic", "virtus", "vento", "slavia", "rapid", "tiago", "tigor", "etios", "corolla", "kwid", "datsun go"],
+  SUV: ["creta", "venue", "alcazar", "seltos", "sonet", "carens", "fortuner", "innova", "hyryder", "urban cruiser", "scorpio", "thar", "xuv700", "xuv300", "bolero", "nexon", "punch", "harrier", "safari", "brezza", "fronx", "grand vitara", "jimny", "hector", "astor", "gloster", "compass", "meridian", "duster", "magnite", "kicks", "gurkha"],
+  Pickup: ["bolero pickup", "boleropikup", "pikup", "veero", "yodha", "dmax", "hilux", "supro"],
+  "Lorry / Bus": ["tata407", "407", "tata709", "709", "lpt", "prima", "dost", "partner", "viking", "eicherpro", "bharatbenz", "traveller", "schoolbus", "touristbus"]
+};
+
+const normalizedModelTypeEntries = [
+  ...Object.entries(vehicleModelsByType).flatMap(([type, models]) =>
+    models.map((model) => ({ key: model.toLowerCase().replace(/[^a-z0-9]/g, ""), type }))
+  ),
+  ...Object.entries(vehicleModelAliases).flatMap(([type, aliases]) =>
+    aliases.map((alias) => ({ key: alias.toLowerCase().replace(/[^a-z0-9]/g, ""), type }))
+  )
+].sort((a, b) => b.key.length - a.key.length);
+
+function inferVehicleTypeFromModel(model) {
+  const key = String(model || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!key) return "";
+  const match = normalizedModelTypeEntries.find(({ key: known }) => key === known || key.startsWith(known) || (known.length >= 6 && key.includes(known)));
+  return match?.type || "";
+}
+
+function CustomerCheckInPage() {
+  const [form, setForm] = useState({ registration: "", model: "", phone: "", consent: false });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const suggestedType = inferVehicleTypeFromModel(form.model);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setError("");
+    const registration = getVehicleRegistration(form.registration);
+    const phoneDigits = normalizePhone(form.phone);
+    const phone = phoneDigits.startsWith("91") && phoneDigits.length === 12 ? phoneDigits.slice(2) : phoneDigits;
+    const model = form.model.trim();
+
+    if (!registration) return setError("Enter a valid registration number, for example KL 71 J 6430.");
+    if (model.length < 2 || model.length > 80) return setError("Enter your vehicle model (2–80 characters).");
+    if (!/^[6-9]\d{9}$/.test(phone)) return setError("Enter a valid 10-digit Indian mobile number.");
+    if (!form.consent) return setError("Please confirm that Wash Depot may use these details for your service and loyalty records.");
+
+    setBusy(true);
+    const { error: submitError } = await supabase.rpc("submit_customer_checkin", {
+      p_vehicle_registration: registration,
+      p_vehicle_model: model,
+      p_phone: phone,
+      p_consent: true,
+    });
+    setBusy(false);
+
+    if (submitError) {
+      setError(submitError.message || "We couldn't submit your check-in. Please ask a Wash Depot staff member for help.");
+      return;
+    }
+    setSubmitted(true);
+  };
+
+  if (submitted) {
+    return (
+      <main className="public-checkin-shell">
+        <section className="public-checkin-card public-checkin-success">
+          <div className="public-brand-mark">WD</div>
+          <p className="public-eyebrow">WASH DEPOT · 30 YEARS</p>
+          <div className="checkin-success-icon">✓</div>
+          <h1>Check-in submitted!</h1>
+          <p>Your details have been sent to the Wash Depot team. Please show this confirmation to our staff. Your vehicle visit and loyalty credit are created only after staff accepts the check-in.</p>
+          <div className="public-anniversary-note">🎉 30th Anniversary Customer Loyalty Rewards<br /><strong>4 paid washes + 1 free wash</strong><br />Available for eligible Bikes, Sedans and SUVs.</div>
+          <button type="button" className="public-submit-button" onClick={() => { setSubmitted(false); setForm({ registration: "", model: "", phone: "", consent: false }); }}>Register another vehicle</button>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="public-checkin-shell">
+      <section className="public-checkin-card">
+        <div className="public-brand-mark">WD</div>
+        <p className="public-eyebrow">CELEBRATING 30 YEARS</p>
+        <h1>Welcome to Wash Depot</h1>
+        <p className="public-checkin-intro">Scan, enter your details and check in. Our team will confirm your vehicle when it arrives.</p>
+        <form className="public-checkin-form" onSubmit={handleSubmit}>
+          <label htmlFor="public-registration">Vehicle registration number</label>
+          <input id="public-registration" value={form.registration} onChange={(e) => setForm({ ...form, registration: e.target.value })} placeholder="e.g. KL 71 J 6430" autoCapitalize="characters" autoComplete="off" maxLength={20} required />
+
+          <label htmlFor="public-model">Vehicle model</label>
+          <input id="public-model" list="wash-depot-models" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="Type your model, e.g. Fortuner" maxLength={80} required />
+          <datalist id="wash-depot-models">{allVehicleModelSuggestions.map((model) => <option key={model} value={model} />)}</datalist>
+          <p className="public-field-hint">Suggestions cover common Sedan and SUV models. You can type any model manually; staff will verify unfamiliar models and other vehicle categories.</p>
+          {suggestedType ? <p className="public-model-hint">Likely vehicle category: <strong>{suggestedType}</strong> · Confirmed by staff at check-in.</p> : form.model.trim().length >= 2 ? <p className="public-model-hint public-model-hint-review">Category will be confirmed by our staff.</p> : null}
+
+          <label htmlFor="public-phone">WhatsApp mobile number</label>
+          <input id="public-phone" type="tel" inputMode="numeric" autoComplete="tel-national" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="10-digit mobile number" maxLength={15} required />
+
+          <label className="public-consent-row"><input type="checkbox" checked={form.consent} onChange={(e) => setForm({ ...form, consent: e.target.checked })} /><span>I agree that Wash Depot may use these details to manage my vehicle service and loyalty rewards.</span></label>
+          {error && <p className="public-form-error" role="alert">{error}</p>}
+          <button type="submit" className="public-submit-button" disabled={busy}>{busy ? "Submitting…" : "Submit Check-in"}</button>
+        </form>
+        <div className="public-anniversary-note">🎉 <strong>Wash Depot 30th Anniversary Rewards</strong><br />Get 1 FREE wash after every 4 completed paid washes on eligible Bikes, Sedans and SUVs. Progress is tracked separately by vehicle registration.</div>
+        <p className="public-privacy-note">Please ask our team if you need help. Submitting this form does not itself start a wash or create a loyalty credit.</p>
+      </section>
+    </main>
+  );
+}
+
+function StaffLogin({ onSuccess }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    const { data, error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (loginError) {
+      setError("Email or password is incorrect. Check the details and try again.");
+      return;
+    }
+    onSuccess(data.session);
+  };
+
+  return (
+    <main className="staff-login-shell">
+      <section className="staff-login-card">
+        <div className="public-brand-mark">WD</div>
+        <p className="public-eyebrow">WASH DEPOT · OWNER ACCESS</p>
+        <h1>Sign in</h1>
+        <p>Use the Wash Depot owner account to open the management dashboard.</p>
+        <form onSubmit={handleLogin} className="staff-login-form">
+          <label htmlFor="staff-email">Email</label>
+          <input id="staff-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <label htmlFor="staff-password">Password</label>
+          <input id="staff-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          {error && <p className="public-form-error" role="alert">{error}</p>}
+          <button className="public-submit-button" type="submit" disabled={busy}>{busy ? "Signing in…" : "Sign in to dashboard"}</button>
+        </form>
+        <p className="public-privacy-note">Customer check-in is public. Vehicle history and customer records require owner sign-in.</p>
+      </section>
+    </main>
+  );
+}
+
+function StaffGate() {
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [accessError, setAccessError] = useState("");
+
+  const verifyStaffSession = async (nextSession) => {
+    setLoading(true);
+    setAccessError("");
+    const { data, error } = await supabase
+      .from("staff_profiles")
+      .select("user_id, display_name, role, is_active")
+      .eq("user_id", nextSession.user.id)
+      .maybeSingle();
+    if (error || !data || data.is_active !== true) {
+      await supabase.auth.signOut();
+      setSession(null);
+      setProfile(null);
+      setAccessError("This account is not authorised for the Wash Depot dashboard. Sign in using the owner account.");
+      setLoading(false);
+      return;
+    }
+    setSession(nextSession);
+    setProfile(data);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    let alive = true;
+    supabase.auth.getSession().then(async ({ data, error }) => {
+      if (!alive) return;
+      if (error || !data.session) {
+        setLoading(false);
+        return;
+      }
+      await verifyStaffSession(data.session);
+    });
+    return () => { alive = false; };
+  }, []);
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setProfile(null);
+  };
+
+  if (loading) return <div className="auth-loading">Loading Wash Depot…</div>;
+  if (!session || !profile) return <><StaffLogin onSuccess={verifyStaffSession} />{accessError && <p className="auth-access-error">{accessError}</p>}</>;
+  return <Dashboard staffProfile={profile} onSignOut={handleSignOut} />;
+}
+
+function App() {
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  if (path === "/check-in") return <CustomerCheckInPage />;
+  return <StaffGate />;
+}
+
 // Only these vehicle categories participate in Wash Depot Loyalty Rewards.
 const loyaltyVehicleTypes = new Set(["Bike", "Sedan", "SUV"]);
 
@@ -138,8 +380,7 @@ function makeVehicleLookupGroups(records, query) {
   return groups.sort((a, b) => new Date(b.latest.created_at || b.latest.service_date).getTime() - new Date(a.latest.created_at || a.latest.service_date).getTime());
 }
 
-// Loyalty starts with visits recorded after the program is enabled.
-// Three completed paid washes earn one free wash. Completing that free wash
+// Four completed paid washes earn one free wash. Completing that free wash
 // resets the cycle for this registration number.
 function getLoyaltyStatus(records, registration) {
   if (!registration) {
@@ -171,18 +412,18 @@ function getLoyaltyStatus(records, registration) {
         freeWashInProgress = true;
       }
     } else if (visit.status === "Completed" && Number(visit.amount) > 0) {
-      paidWashes += 1;
+      paidWashes = Math.min(LOYALTY_REQUIRED_PAID_WASHES, paidWashes + 1);
     }
   }
 
   return {
     paidWashes,
-    freeWashDue: paidWashes >= 3 && !freeWashInProgress,
+    freeWashDue: paidWashes >= LOYALTY_REQUIRED_PAID_WASHES && !freeWashInProgress,
     freeWashInProgress,
   };
 }
 
-function App() {
+function Dashboard({ staffProfile, onSignOut }) {
   const today = new Date().toLocaleDateString("en-CA");
 
   const [vehicle, setVehicle] = useState({
@@ -195,6 +436,8 @@ function App() {
   });
 
   const [vehicles, setVehicles] = useState([]);
+  const [pendingCheckins, setPendingCheckins] = useState([]);
+  const [checkinChoices, setCheckinChoices] = useState({});
 
   const [showHistory, setShowHistory] = useState(false);
   const [selectedDate, setSelectedDate] = useState(today);
@@ -224,6 +467,22 @@ function App() {
   // Load vehicles from Supabase
   useEffect(() => {
     loadVehicles();
+    loadPendingCheckins();
+  }, []);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("wash-depot-customer-checkins")
+      .on("postgres_changes", { event: "*", schema: "public", table: "customer_checkins" }, () => {
+        loadPendingCheckins();
+      })
+      .subscribe();
+    // Poll every 15 seconds as a fallback if Supabase Realtime is not enabled.
+    const refreshInterval = window.setInterval(loadPendingCheckins, 15000);
+    return () => {
+      window.clearInterval(refreshInterval);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const loadVehicles = async () => {
@@ -241,6 +500,83 @@ function App() {
 
     setVehicles(data || []);
     setLoading(false);
+  };
+
+  const loadPendingCheckins = async () => {
+    const { data, error } = await supabase
+      .from("customer_checkins")
+      .select("id, registration, vehicle_model, phone, created_at, expires_at, status")
+      .eq("status", "Pending")
+      .gt("expires_at", new Date().toISOString())
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error("Error loading customer check-ins:", error);
+      return;
+    }
+    setPendingCheckins(data || []);
+  };
+
+  const updateCheckinChoice = (id, key, value) => {
+    setCheckinChoices((current) => ({
+      ...current,
+      [id]: { ...(current[id] || {}), [key]: value },
+    }));
+  };
+
+  const acceptCustomerCheckin = async (checkin) => {
+    const choice = checkinChoices[checkin.id] || {};
+    const inferredType = inferVehicleTypeFromModel(checkin.vehicle_model);
+    const selectedType = choice.vehicleType ?? inferredType ?? "";
+    const selectedWorker = choice.worker || "";
+    const loyalty = getLoyaltyStatus(vehicles, checkin.registration);
+    const freeWashDueForVisit = isLoyaltyEligibleType(selectedType) && loyalty.freeWashDue;
+    const amount = freeWashDueForVisit ? 0 : Number(choice.amount);
+
+    if (!selectedType) {
+      alert("Please identify the vehicle category before accepting this check-in.");
+      return;
+    }
+    if (!selectedWorker) {
+      alert("Please assign a worker before accepting this check-in.");
+      return;
+    }
+    if (!freeWashDueForVisit && (!Number.isFinite(amount) || amount <= 0)) {
+      alert("Enter a service amount greater than zero for a paid wash.");
+      return;
+    }
+
+    const { error } = await supabase.rpc("accept_customer_checkin", {
+      p_checkin_id: checkin.id,
+      p_vehicle_type: selectedType,
+      p_assigned_worker: selectedWorker,
+      p_amount: amount,
+    });
+
+    if (error) {
+      console.error("Error accepting customer check-in:", error);
+      alert(error.message || "Could not accept this check-in. Refresh and try again.");
+      return;
+    }
+
+    setCheckinChoices((current) => {
+      const next = { ...current };
+      delete next[checkin.id];
+      return next;
+    });
+    await Promise.all([loadVehicles(), loadPendingCheckins()]);
+    alert(freeWashDueForVisit ? "Check-in accepted. This vehicle's earned reward has been applied as a free wash." : "Customer check-in accepted and added to today's vehicles.");
+  };
+
+  const rejectCustomerCheckin = async (checkin) => {
+    const confirmed = window.confirm(`Reject the check-in for ${checkin.registration}? No vehicle visit or loyalty credit will be created.`);
+    if (!confirmed) return;
+    const { error } = await supabase.rpc("reject_customer_checkin", { p_checkin_id: checkin.id });
+    if (error) {
+      alert(error.message || "Could not reject this check-in.");
+      return;
+    }
+    await loadPendingCheckins();
   };
 
   // Look up a previously saved registration after the records finish loading.
@@ -403,40 +739,34 @@ function App() {
     await markCompleted(item.id);
   };
 
-  // Send WhatsApp with vehicle-specific loyalty progress
+  // Send WhatsApp with the 30th Anniversary promotion and current vehicle loyalty progress.
   const sendWhatsApp = (item) => {
     const registration = getItemRegistration(item);
     const loyalty = getLoyaltyStatus(vehicles, registration);
+    const progress = Math.min(loyalty.paidWashes, LOYALTY_REQUIRED_PAID_WASHES);
+    const remaining = LOYALTY_REQUIRED_PAID_WASHES - progress;
 
     let loyaltyMessage;
-    const progress = Math.min(loyalty.paidWashes, 3);
-    const remaining = 3 - progress;
-
     if (item.is_free_wash === true) {
-      loyaltyMessage = progress === 0
-        ? "🎉 This visit was your FREE 4th wash! Your loyalty counter has reset to 0 of 3 paid washes for the next reward."
-        : `🎉 This visit was your FREE 4th wash! Your counter reset after redemption. Your next cycle is already at ${progress} of 3 paid washes.`;
+      loyaltyMessage = "🎉 This visit was your FREE 5th wash! Your loyalty counter has reset to 0 of 4 paid washes for the next reward.";
     } else if (!isLoyaltyEligibleType(item.vehicle_type)) {
       loyaltyMessage = "🎁 Wash Depot Loyalty Rewards are available for Sedan, SUV and Bike only. This vehicle type is not included in the loyalty program.";
     } else if (!registration) {
-      loyaltyMessage =
-        "🎁 Wash Depot Loyalty Rewards: loyalty progress is tracked by vehicle registration number. Please make sure your registration is recorded on your next visit.";
+      loyaltyMessage = "🎁 Wash Depot Loyalty Rewards are tracked separately by vehicle registration. Please make sure your registration number is recorded.";
     } else if (loyalty.freeWashInProgress) {
-      loyaltyMessage =
-        "🎁 Wash Depot Loyalty Rewards: your free wash reward has been unlocked and a free wash is currently in progress for this vehicle.";
-    } else if (progress >= 3) {
-      loyaltyMessage =
-        "🎁 Wash Depot Loyalty Rewards: you have completed 3 paid washes! Your NEXT wash is FREE.";
+      loyaltyMessage = "🎁 Your free wash reward has been unlocked and is currently in progress for this vehicle.";
+    } else if (progress >= LOYALTY_REQUIRED_PAID_WASHES) {
+      loyaltyMessage = "🎁 You have completed 4 paid washes! Your NEXT wash is FREE.";
     } else {
-      loyaltyMessage = `🎁 Wash Depot Loyalty Rewards: ${progress} of 3 paid washes completed. ${remaining} more paid ${remaining === 1 ? "wash" : "washes"} until your next wash is FREE!`;
+      loyaltyMessage = `🎁 Your loyalty progress: ${progress} of 4 paid washes completed. ${remaining} more paid ${remaining === 1 ? "wash" : "washes"} until your next wash is FREE!`;
     }
 
     const anniversaryMessage = [
       "🎉 *WASH DEPOT — CELEBRATING 30 YEARS!*",
-      "As part of our 30th Anniversary celebrations, enjoy our special loyalty rewards:",
-      "🎁 *Get 1 FREE WASH after every 3 completed paid washes!*",
+      "As part of our 30th Anniversary celebrations, enjoy our special customer loyalty rewards:",
+      "🎁 *Get 1 FREE WASH after every 4 completed paid washes!*",
       "*Eligible vehicles: Bikes, Sedans and SUVs.*",
-      "Loyalty progress is tracked separately for each vehicle registration number.",
+      "Loyalty progress is tracked separately for each vehicle registration number."
     ].join("\n");
 
     const message = [
@@ -444,25 +774,16 @@ function App() {
       anniversaryMessage,
       loyaltyMessage,
       "Thank you for being part of our journey. Here's to many more years together!",
-      "❤️ *Team Wash Depot*",
+      "❤️ *Team Wash Depot*"
     ].join("\n\n");
 
     let phone = String(item.phone || "").replace(/\D/g, "");
-
     if (!phone) {
       alert("This vehicle does not have a customer WhatsApp number saved.");
       return;
     }
-
-    // Automatically add India country code for 10-digit numbers
-    if (phone.length === 10) {
-      phone = "91" + phone;
-    }
-
-    window.open(
-      `https://wa.me/${phone}?text=${encodeURIComponent(message)}`,
-      "_blank"
-    );
+    if (phone.length === 10) phone = "91" + phone;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, "_blank");
   };
 
   // Start editing
@@ -610,7 +931,7 @@ function App() {
               <p className="subtitle">Customer &amp; Vehicle Lookup</p>
             </div>
           </div>
-          <span className="header-tag">CAR CARE MANAGEMENT</span>
+          <div className="header-controls"><span className="header-tag">CAR CARE MANAGEMENT</span><span className="staff-name">{staffProfile?.display_name || "Owner"}</span><button type="button" className="header-signout" onClick={onSignOut}>Sign out</button></div>
         </header>
         <button type="button" className="back-button" onClick={() => setShowLookup(false)}>← Back to Today</button>
         <div className="lookup-panel">
@@ -632,7 +953,7 @@ function App() {
           <div className="lookup-results">
             {lookupGroups.map((group) => {
               const eligible = isLoyaltyEligibleType(group.vehicleType);
-              const paidProgress = Math.min(group.loyalty.paidWashes, 3);
+              const paidProgress = Math.min(group.loyalty.paidWashes, LOYALTY_REQUIRED_PAID_WASHES);
               return (
                 <section className="lookup-card" key={group.key}>
                   <div className="lookup-card-heading">
@@ -652,7 +973,7 @@ function App() {
                   </div>
                   <div className="lookup-loyalty">
                     <strong>Loyalty</strong>
-                    <p>{!group.registration ? "Registration is missing; loyalty can't be safely matched." : !eligible ? `${group.vehicleType || "This type"} is not eligible. Rewards apply to Bike, Sedan and SUV.` : group.loyalty.freeWashInProgress ? "A free wash is currently in progress." : group.loyalty.freeWashDue ? "FREE wash earned — next eligible visit should redeem it." : `${paidProgress} of 3 completed paid washes toward the next free wash.`}</p>
+                    <p>{!group.registration ? "Registration is missing; loyalty can't be safely matched." : !eligible ? `${group.vehicleType || "This type"} is not eligible. Rewards apply to Bike, Sedan and SUV.` : group.loyalty.freeWashInProgress ? "A free wash is currently in progress." : group.loyalty.freeWashDue ? "FREE wash earned — next eligible visit should redeem it." : `${paidProgress} of 4 completed paid washes toward the next free wash.`}</p>
                   </div>
                   <details className="lookup-history">
                     <summary>Visit history ({group.visits.length})</summary>
@@ -689,7 +1010,7 @@ function App() {
               <p className="subtitle">Vehicle History</p>
             </div>
           </div>
-          <span className="header-tag">CAR CARE MANAGEMENT</span>
+          <div className="header-controls"><span className="header-tag">CAR CARE MANAGEMENT</span><span className="staff-name">{staffProfile?.display_name || "Owner"}</span><button type="button" className="header-signout" onClick={onSignOut}>Sign out</button></div>
         </header>
 
         <button
@@ -805,18 +1126,80 @@ function App() {
             <p className="subtitle">Vehicle Service Management</p>
           </div>
         </div>
-        <span className="header-tag">CAR CARE MANAGEMENT</span>
+        <div className="header-controls"><span className="header-tag">CAR CARE MANAGEMENT</span><span className="staff-name">{staffProfile?.display_name || "Owner"}</span><button type="button" className="header-signout" onClick={onSignOut}>Sign out</button></div>
       </header>
 
       <section className="page-intro">
         <div className="page-intro-copy">
           <p className="eyebrow">DAILY OPERATIONS</p>
           <h2>Add Vehicle</h2>
-          <p className="section-description">Register a vehicle, track its wash, and keep customer details ready for next time.</p>
+          <p className="section-description">Review customer QR check-ins, register visits and manage vehicle history.</p>
         </div>
         <button type="button" className="lookup-button" onClick={() => { setLookupQuery(""); setShowLookup(true); }}>
           <span aria-hidden="true">⌕</span><span>Find Customer / Vehicle</span>
         </button>
+      </section>
+
+      <section className="checkin-queue-section" aria-labelledby="checkin-queue-heading">
+        <div className="checkin-queue-heading">
+          <div>
+            <p className="eyebrow">CUSTOMER SELF CHECK-IN</p>
+            <h2 id="checkin-queue-heading">QR Check-ins</h2>
+            <p className="section-description">New customer submissions appear here. Verify the suggested vehicle category, assign a worker and set the service amount before accepting.</p>
+          </div>
+          <span className="checkin-count">{pendingCheckins.length} waiting</span>
+        </div>
+        {pendingCheckins.length === 0 ? (
+          <div className="checkin-empty">No new customer check-ins right now.</div>
+        ) : (
+          <div className="checkin-list">
+            {pendingCheckins.map((checkin) => {
+              const choice = checkinChoices[checkin.id] || {};
+              const inferredType = inferVehicleTypeFromModel(checkin.vehicle_model);
+              const selectedType = choice.vehicleType ?? inferredType ?? "";
+              const selectedWorker = choice.worker ?? "";
+              const selectedAmount = choice.amount ?? "";
+              const loyalty = getLoyaltyStatus(vehicles, checkin.registration);
+              const freeDue = isLoyaltyEligibleType(selectedType) && loyalty.freeWashDue;
+              return (
+                <article className="checkin-card" key={checkin.id}>
+                  <div className="checkin-card-top">
+                    <div>
+                      <strong>{checkin.registration}</strong>
+                      <p>{checkin.vehicle_model}</p>
+                      <span>{checkin.phone} · Submitted {new Date(checkin.created_at).toLocaleString("en-IN")}</span>
+                    </div>
+                    <span className={`model-match ${inferredType ? "model-match-found" : "model-match-review"}`}>
+                      {inferredType ? `Suggested: ${inferredType}` : "Needs category check"}
+                    </span>
+                  </div>
+                  <div className="checkin-controls">
+                    <label>Confirm vehicle category
+                      <select value={selectedType} onChange={(e) => updateCheckinChoice(checkin.id, "vehicleType", e.target.value)}>
+                        <option value="">Select category</option>
+                        {vehicleTypes.map((type) => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                    </label>
+                    <label>Assigned worker
+                      <select value={selectedWorker} onChange={(e) => updateCheckinChoice(checkin.id, "worker", e.target.value)}>
+                        <option value="">Select worker</option>
+                        {workers.map((worker) => <option key={worker} value={worker}>{worker}</option>)}
+                      </select>
+                    </label>
+                    <label>Service amount (₹)
+                      <input type="number" min={freeDue ? "0" : "0.01"} step="0.01" value={freeDue ? "0" : selectedAmount} disabled={freeDue} placeholder={freeDue ? "Free reward" : "Enter amount"} onChange={(e) => updateCheckinChoice(checkin.id, "amount", e.target.value)} />
+                    </label>
+                  </div>
+                  {freeDue && <p className="checkin-free-note">This registration has earned a free wash. It will be recorded as ₹0.</p>}
+                  <div className="checkin-actions">
+                    <button type="button" className="checkin-accept-button" onClick={() => acceptCustomerCheckin(checkin)}>Accept check-in</button>
+                    <button type="button" className="checkin-reject-button" onClick={() => rejectCustomerCheckin(checkin)}>Reject</button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <form onSubmit={addVehicle}>
@@ -867,11 +1250,11 @@ function App() {
           <div className={`loyalty-status ${freeWashDue ? "loyalty-status-free" : ""}`}>
             <strong>Wash Depot Rewards · {currentRegistration}</strong>
             {freeWashDue ? (
-              <p>You have completed 3 paid washes. This visit will be FREE! The counter resets after this free wash is completed.</p>
+              <p>You have completed 4 paid washes. This visit will be FREE! The counter resets after this free wash is completed.</p>
             ) : freeWashInProgress ? (
               <p>A free wash is already in progress for this vehicle. Complete it before registering another visit.</p>
             ) : (
-              <p>{Math.min(currentLoyalty.paidWashes, 3)} of 3 paid washes completed. {3 - Math.min(currentLoyalty.paidWashes, 3)} more paid {3 - Math.min(currentLoyalty.paidWashes, 3) === 1 ? "wash" : "washes"} until the next wash is free.</p>
+              <p>{Math.min(currentLoyalty.paidWashes, LOYALTY_REQUIRED_PAID_WASHES)} of 4 paid washes completed. {LOYALTY_REQUIRED_PAID_WASHES - Math.min(currentLoyalty.paidWashes, LOYALTY_REQUIRED_PAID_WASHES)} more paid {LOYALTY_REQUIRED_PAID_WASHES - Math.min(currentLoyalty.paidWashes, LOYALTY_REQUIRED_PAID_WASHES) === 1 ? "wash" : "washes"} until the next wash is free.</p>
             )}
           </div>
         ) : currentRegistration && vehicle.type ? (
@@ -1203,5 +1586,7 @@ function App() {
     </div>
   );
 }
+
+/* QR check-in and staff authentication wrapper */
 
 export default App;
