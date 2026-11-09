@@ -1146,3 +1146,42 @@ button, summary {
   line-height: 1.45;
 }
 .checkin-loyalty-status strong { font-weight: 750; }
+
+
+/* Inline owner notifications: replace disruptive browser alert dialogs. */
+.wd-notice {
+  position: fixed;
+  z-index: 10000;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  width: min(520px, calc(100vw - 24px));
+  padding: 14px 15px;
+  border: 1px solid #d0d5dd;
+  border-left: 4px solid #667085;
+  border-radius: 12px;
+  background: #fff;
+  color: #202124;
+  box-shadow: 0 12px 32px rgba(16, 24, 40, .18);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.wd-notice-error { border-left-color: #d90000; background: #fffafa; }
+.wd-notice-success { border-left-color: #16866d; background: #f5fffa; }
+.wd-notice-info { border-left-color: #3478c5; }
+.wd-notice-close {
+  flex: 0 0 28px;
+  min-height: 28px;
+  width: 28px;
+  margin: -4px -5px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #667085;
+  font-size: 22px;
+  line-height: 1;
+}
+.wd-notice-close:hover { background: #f2f4f7; color: #171717; box-shadow: none; }

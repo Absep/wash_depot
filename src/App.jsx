@@ -464,6 +464,19 @@ function Dashboard({ staffProfile, onSignOut }) {
   const [showLookup, setShowLookup] = useState(false);
   const [lookupQuery, setLookupQuery] = useState("");
   const [visitActionBusy, setVisitActionBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+
+  // Use an in-app message instead of disruptive browser alert popups.
+  const showNotice = (message, type = "error") => {
+    setNotice({ message, type });
+  };
+
+  const renderNotice = () => notice && (
+    <div className={`wd-notice wd-notice-${notice.type}`} role={notice.type === "error" ? "alert" : "status"}>
+      <span>{notice.message}</span>
+      <button type="button" className="wd-notice-close" aria-label="Dismiss message" onClick={() => setNotice(null)}>×</button>
+    </div>
+  );
 
   const currentRegistration = getVehicleRegistration(vehicle.registration);
   const currentLoyalty = getLoyaltyStatus(vehicles, currentRegistration);
@@ -500,7 +513,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error loading vehicles:", error);
-      alert("Could not load vehicles.");
+      showNotice(error.message || "Could not load vehicles.", "error");
       setLoading(false);
       return;
     }
@@ -541,15 +554,15 @@ function Dashboard({ staffProfile, onSignOut }) {
     const amount = freeWashDueForVisit ? 0 : Number(choice.amount);
 
     if (!selectedType) {
-      alert("Please identify the vehicle category before accepting this check-in.");
+      showNotice("Please identify the vehicle category before accepting this check-in.");
       return;
     }
     if (!selectedWorker) {
-      alert("Please assign a worker before accepting this check-in.");
+      showNotice("Please assign a worker before accepting this check-in.");
       return;
     }
     if (!freeWashDueForVisit && (!Number.isFinite(amount) || amount <= 0)) {
-      alert("Enter a service amount greater than zero for a paid wash.");
+      showNotice("Enter a service amount greater than zero for a paid wash.");
       return;
     }
 
@@ -562,7 +575,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error accepting customer check-in:", error);
-      alert("Could not add this vehicle. Please try again.");
+      showNotice(error.message || "Could not add this vehicle. Please try again.", "error");
       return;
     }
 
@@ -580,7 +593,7 @@ function Dashboard({ staffProfile, onSignOut }) {
     if (!confirmed) return;
     const { error } = await supabase.rpc("reject_customer_checkin", { p_checkin_id: checkin.id });
     if (error) {
-      alert("Could not remove this check-in. Please try again.");
+      showNotice(error.message || "Could not remove this check-in. Please try again.", "error");
       return;
     }
     await loadPendingCheckins();
@@ -643,7 +656,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
   const useLookupVehicle = (group) => {
     if (!group.registration) {
-      alert("Please enter the vehicle registration number first.");
+      showNotice("Please enter the vehicle registration number first.");
       return;
     }
     setVehicle((current) => ({
@@ -677,19 +690,19 @@ function Dashboard({ staffProfile, onSignOut }) {
     const freeWashInProgressForVisit = loyaltyEnabledForVisit && loyalty.freeWashInProgress;
 
     if (!registration) {
-      alert("Enter a valid vehicle registration number, for example KL 71 J 6430.");
+      showNotice("Enter a valid vehicle registration number, for example KL 71 J 6430.");
       return;
     }
     if (!vehicle.type || !vehicle.worker) {
-      alert("Please select a vehicle type and assigned worker.");
+      showNotice("Please select a vehicle type and assigned worker.");
       return;
     }
     if (!freeWashDueForVisit && (vehicle.amount === "" || !Number.isFinite(Number(vehicle.amount)) || Number(vehicle.amount) <= 0)) {
-      alert("Enter an amount greater than zero for a paid wash.");
+      showNotice("Enter an amount greater than zero for a paid wash.");
       return;
     }
     if (freeWashInProgressForVisit) {
-      alert("A free wash is already in progress for this vehicle. Complete it before adding another visit.");
+      showNotice("A free wash is already in progress for this vehicle. Complete it before adding another visit.");
       return;
     }
 
@@ -705,7 +718,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error adding vehicle:", error);
-      alert("Could not add this vehicle. Please check the details and try again.");
+      showNotice(error.message || "Could not add this vehicle. Please check the details and try again.", "error");
       return;
     }
 
@@ -716,24 +729,36 @@ function Dashboard({ staffProfile, onSignOut }) {
     await loadVehicles();
 
     if (newItem?.is_free_wash) {
-      alert("This vehicle had earned a free wash. The visit was saved as FREE (₹0).");
+      showNotice("Free wash added. Amount: ₹0.", "success");
     }
   };
 
   // Complete a visit and update loyalty progress in the same database transaction.
   const markCompleted = async (id) => {
-    const { error } = await supabase.rpc("complete_wash_visit", {
-      p_vehicle_id: id,
-    });
+    if (visitActionBusy) return false;
+    setVisitActionBusy(true);
+    try {
+      const { error } = await supabase.rpc("complete_wash_visit", {
+        p_vehicle_id: id,
+      });
 
-    if (error) {
-      console.error("Error updating status:", error);
-      alert("Could not mark this vehicle as completed. Please try again.");
+      if (error) {
+        console.error("Error updating status:", error);
+        // Show the exact database message so a failed free-wash reservation can be diagnosed.
+        showNotice(error.message || "Could not mark this vehicle as completed. Please try again.", "error");
+        return false;
+      }
+
+      await loadVehicles();
+      showNotice("Vehicle marked as completed.", "success");
+      return true;
+    } catch (error) {
+      console.error("Unexpected completion error:", error);
+      showNotice(error?.message || "Connection problem. Please try again.", "error");
       return false;
+    } finally {
+      setVisitActionBusy(false);
     }
-
-    await loadVehicles();
-    return true;
   };
 
   // Old visits can remain marked Washing when the team forgets to update them.
@@ -761,7 +786,7 @@ function Dashboard({ staffProfile, onSignOut }) {
     setVisitActionBusy(false);
     if (error) {
       console.error("Error cancelling visit:", error);
-      alert("Could not update this visit. Please try again.");
+      showNotice(error.message || "Could not update this visit. Please try again.", "error");
       return;
     }
     await loadVehicles();
@@ -782,7 +807,7 @@ function Dashboard({ staffProfile, onSignOut }) {
     setVisitActionBusy(false);
     if (error) {
       console.error("Error reopening visit:", error);
-      alert("Could not update this visit. Please try again.");
+      showNotice(error.message || "Could not update this visit. Please try again.", "error");
       return;
     }
     await loadVehicles();
@@ -828,7 +853,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     let phone = String(item.phone || "").replace(/\D/g, "");
     if (!phone) {
-      alert("This vehicle does not have a customer WhatsApp number saved.");
+      showNotice("This vehicle does not have a customer WhatsApp number saved.");
       return;
     }
     if (phone.length === 10) phone = "91" + phone;
@@ -863,15 +888,15 @@ function Dashboard({ staffProfile, onSignOut }) {
     const editedRegistration = getVehicleRegistration(editVehicle.registration);
 
     if (!editedRegistration) {
-      alert("Enter a valid registration number, for example KL 71 J 6430.");
+      showNotice("Enter a valid registration number, for example KL 71 J 6430.");
       return;
     }
     if (originalItem && getItemRegistration(originalItem) && originalItem.loyalty_eligible === true && editedRegistration !== getItemRegistration(originalItem)) {
-      alert("This visit is linked to loyalty history. Keep its registration unchanged; contact the owner to correct a registration typo.");
+      showNotice("This visit is linked to loyalty history. Keep its registration unchanged; contact the owner to correct a registration typo.");
       return;
     }
     if (!originalItem?.is_free_wash && (!Number.isFinite(Number(editVehicle.amount)) || Number(editVehicle.amount) <= 0)) {
-      alert("Amount must be greater than zero for a paid wash.");
+      showNotice("Amount must be greater than zero for a paid wash.");
       return;
     }
 
@@ -887,7 +912,7 @@ function Dashboard({ staffProfile, onSignOut }) {
 
     if (error) {
       console.error("Error editing vehicle:", error);
-      alert("Could not save changes. Please try again.");
+      showNotice(error.message || "Could not save changes. Please try again.", "error");
       return;
     }
 
@@ -972,6 +997,7 @@ function Dashboard({ staffProfile, onSignOut }) {
   if (showLookup) {
     return (
       <div className="app">
+        {renderNotice()}
         <header className="app-header">
           <div className="brand-lockup">
             <img className="brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
@@ -1050,6 +1076,7 @@ function Dashboard({ staffProfile, onSignOut }) {
   if (showHistory) {
     return (
       <div className="app">
+        {renderNotice()}
         <header className="app-header">
           <div className="brand-lockup">
             <img className="brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
@@ -1171,6 +1198,7 @@ function Dashboard({ staffProfile, onSignOut }) {
   // Main page
   return (
     <div className="app">
+      {renderNotice()}
       <header className="app-header">
         <div className="brand-lockup">
             <img className="brand-logo" src="/wash-depot-logo.png" alt="Wash Depot — Since 1996" />
